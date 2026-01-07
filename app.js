@@ -7,6 +7,8 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   signOut,
   onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/11.5.0/firebase-auth.js";
@@ -46,7 +48,7 @@ const APP_NAME = "ChattyChatFace";
 const BRAND_NAME = "StaticQuasar931";
 const BRAND_LINK = "https://sites.google.com/view/staticquasar931/gm3z";
 
-const THEMES = ["dark", "light", "ocean", "forest"];
+const THEMES = ["dark", "light", "ocean", "forest", "sunset", "lavender", "midnight", "rose"];
 const DEFAULT_THEME = "dark";
 
 const SEND_COOLDOWN_MS = 500;
@@ -56,6 +58,13 @@ const LOAD_LAST_N = 80;
 const DISPLAY_MIN = 3;
 const DISPLAY_MAX = 20;
 const DISPLAY_REGEX = /^[A-Za-z0-9._-]+$/; // no spaces
+
+const BRAND_ICON = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png";
+const BRAND_BANNER = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/StaticQuasar931_Banner_Media_Google_Sites_Neon_ChatGPT_Image.png";
+const GOOGLE_SIGNIN_IMG = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/Screenshot_2025-11-24_162537-removebg-preview.png";
+
+const REACTION_EMOJIS = ["❤️", "👍", "😂", "🔥", "🎉", "😮"];
+const QUICK_REACTION = "❤️";
 
 // Unicode emoji list for picker
 const EMOJI_LIST = [
@@ -117,6 +126,91 @@ const root = document.getElementById("app");
 
   body.gui-hidden .appShell{ display:none !important; }
   body.gui-hidden #toastWrap{ display:none !important; }
+
+  .authScreen{
+    min-height: 100vh;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding: 24px;
+  }
+  .authCard{
+    width: min(720px, 100%);
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow: var(--shadow);
+    padding: 20px;
+    display:flex;
+    flex-direction:column;
+    gap:16px;
+    text-align:center;
+  }
+  .authBanner{
+    width: 100%;
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    object-fit: cover;
+    max-height: 220px;
+  }
+  .authBrand{
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:10px;
+  }
+  .authLogo{
+    width: 72px;
+    height: 72px;
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,.08);
+  }
+  .authTitle{
+    font-weight: 950;
+    font-size: 22px;
+    letter-spacing: .2px;
+  }
+  .authSubtitle{
+    color: var(--muted);
+    font-size: 14px;
+  }
+  .googleBtn{
+    display:inline-flex;
+    align-items:center;
+    justify-content:center;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,.08);
+    border-radius: 16px;
+    padding: 8px 16px;
+    cursor:pointer;
+  }
+  .googleBtn:disabled{
+    opacity: .6;
+    cursor:not-allowed;
+  }
+  .googleBtn img{
+    height: 44px;
+    width: auto;
+    display:block;
+  }
+  .authFooter{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .adSlot{
+    height: 90px;
+    border: 1px dashed var(--border);
+    border-radius: 16px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    color: var(--muted);
+    font-size: 12px;
+  }
 
   .appShell{
     display:grid;
@@ -237,6 +331,46 @@ const root = document.getElementById("app");
     max-width: 100%;
     border-radius:12px;
     border:1px solid var(--border);
+  }
+  .msgActions{
+    display:flex;
+    gap:6px;
+    margin-top:8px;
+    flex-wrap:wrap;
+    opacity: 0;
+    transition: opacity .15s ease;
+  }
+  .msgBubble:hover .msgActions{ opacity: 1; }
+  .reactionBtn{
+    border: 1px solid var(--border);
+    background: rgba(0,0,0,.18);
+    border-radius: 999px;
+    padding: 4px 8px;
+    font-size: 12px;
+    cursor:pointer;
+  }
+  .reactionBtn.active{
+    border-color: rgba(106,167,255,.5);
+    background: rgba(106,167,255,.18);
+  }
+  .reactionSummary{
+    display:flex;
+    gap:6px;
+    flex-wrap:wrap;
+    margin-top:6px;
+  }
+  .reactionChip{
+    display:inline-flex;
+    align-items:center;
+    gap:4px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 2px 8px;
+    font-size: 12px;
+    background: rgba(0,0,0,.18);
+  }
+  @media (hover: none){
+    .msgActions{ opacity: 1; }
   }
 
   .composer{
@@ -474,6 +608,46 @@ const root = document.getElementById("app");
     --shadow: 0 12px 34px rgba(0,0,0,.35);
     --accent:#32d17b;
   }
+  body.theme-sunset{
+    --bg:#160c0f;
+    --panel:#231218;
+    --panel2:#1b0f14;
+    --text:#ffe8f0;
+    --muted:#d9a8b8;
+    --border: rgba(255,232,240,.14);
+    --shadow: 0 12px 34px rgba(0,0,0,.35);
+    --accent:#ff7a59;
+  }
+  body.theme-lavender{
+    --bg:#151225;
+    --panel:#1d1a33;
+    --panel2:#18162c;
+    --text:#f1ecff;
+    --muted:#b7addd;
+    --border: rgba(241,236,255,.14);
+    --shadow: 0 12px 34px rgba(0,0,0,.35);
+    --accent:#9f7bff;
+  }
+  body.theme-midnight{
+    --bg:#06070f;
+    --panel:#0d1222;
+    --panel2:#0b111f;
+    --text:#e7f0ff;
+    --muted:#93a3c3;
+    --border: rgba(231,240,255,.12);
+    --shadow: 0 12px 34px rgba(0,0,0,.42);
+    --accent:#3b82f6;
+  }
+  body.theme-rose{
+    --bg:#160b12;
+    --panel:#20101b;
+    --panel2:#190e16;
+    --text:#ffe9f4;
+    --muted:#d6a3bd;
+    --border: rgba(255,233,244,.14);
+    --shadow: 0 12px 34px rgba(0,0,0,.35);
+    --accent:#ff5ca8;
+  }
   `;
   const style = document.createElement("style");
   style.textContent = css;
@@ -516,6 +690,9 @@ const S = {
   msgChildAddedUnsub: null,
   typingUnsub: null,
   presenceUnsubs: [],
+  userDataUnsub: null,
+  chatRefsUnsub: null,
+  reactionUnsubs: [],
 
   lastSendAt: 0,
 
@@ -527,6 +704,7 @@ const S = {
 
   _nameCache: {},
   _seenMsgKeys: {}, // { scopeKey: Set(msgKey) }
+  _reactionCache: {},
 
   isWindowFocused: true
 };
@@ -748,21 +926,38 @@ function openSignInModal() {
     ])
   ]);
 
-  const btn = el("button", { class: "btn btnPrimary" }, ["Continue with Google"]);
+  const btn = el("button", { class: "googleBtn", "aria-label": "Continue with Google" }, [
+    el("img", { src: GOOGLE_SIGNIN_IMG, alt: "Continue with Google" })
+  ]);
   const cancel = el("button", { class: "btn" }, ["Cancel"]);
 
   btn.addEventListener("click", async () => {
     btn.disabled = true;
-    btn.textContent = "Signing in...";
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
       await signInWithPopup(auth, provider);
       m.close();
     } catch (e) {
+      const message = String(e?.message || "");
+      const code = String(e?.code || "");
+      const shouldRedirect =
+        message.includes("Cross-Origin-Opener-Policy") ||
+        code.includes("popup-blocked") ||
+        code.includes("popup-closed-by-user");
+      if (shouldRedirect) {
+        try {
+          const provider = new GoogleAuthProvider();
+          provider.setCustomParameters({ prompt: "select_account" });
+          await signInWithRedirect(auth, provider);
+          return;
+        } catch {
+          showToast(getFriendlyAuthError(e), "error");
+        }
+      } else {
+        showToast(getFriendlyAuthError(e), "error");
+      }
       btn.disabled = false;
-      btn.textContent = "Continue with Google";
-      showToast(getFriendlyAuthError(e), "error");
     }
   });
 
@@ -867,15 +1062,15 @@ function openDisplayNameModal(user) {
     "No spaces. Not case sensitive for uniqueness. Your exact casing shows everywhere.",
     el("br"),
     "Example: ",
-    el("span", { class: "kbd", text: "heLlo" }),
-    " reserves ",
-    el("span", { class: "kbd", text: "hello" }),
-    " too."
+    el("span", { class: "kbd", text: "StaticQuasar931" }),
+    " or ",
+    el("span", { class: "kbd", text: "LovelyBricks23" }),
+    "."
   ]);
 
   const input = el("input", {
     class: "input",
-    placeholder: "Example: MinecraftTime",
+    placeholder: "Example: StaticQuasar931",
     autocomplete: "off",
     spellcheck: "false"
   });
@@ -915,6 +1110,7 @@ function openDisplayNameModal(user) {
       await update(ref(db, `publicUsers/${user.uid}`), {
         uid: user.uid,
         displayNameDisplay: raw,
+        displayNameNormalized: normalized,
         photoURL: user.photoURL || null,
         lastSeen: nowMs(),
         status: "online"
@@ -948,7 +1144,16 @@ function openDisplayNameModal(user) {
 ---------------------------- */
 function applyTheme(theme) {
   const t = THEMES.includes(theme) ? theme : DEFAULT_THEME;
-  document.body.classList.remove("theme-dark", "theme-light", "theme-ocean", "theme-forest");
+  document.body.classList.remove(
+    "theme-dark",
+    "theme-light",
+    "theme-ocean",
+    "theme-forest",
+    "theme-sunset",
+    "theme-lavender",
+    "theme-midnight",
+    "theme-rose"
+  );
   document.body.classList.add(`theme-${t}`);
   S.theme = t;
 }
@@ -966,29 +1171,61 @@ async function saveThemeToCloud(theme) {
 function renderSignedOut() {
   clear(root);
 
-  const wrap = el("div", { class: "panel", style: "margin:12px; padding:14px; width: min(680px, calc(100% - 24px));" }, [
-    el("div", { style: "display:flex; align-items:center; gap:12px;" }, [
-      el("img", { src: "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png", style: "width:44px; height:44px; border-radius:14px; border:1px solid var(--border); background: rgba(255,255,255,.06);" }),
-      el("div", { style: "display:flex; flex-direction:column; gap:2px;" }, [
-        el("div", { style: "font-weight:950; font-size:18px;", text: APP_NAME }),
-        el("div", { class: "hint" }, [
-          "Made by ",
-          el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [BRAND_NAME]),
-          "."
-        ])
-      ])
-    ]),
-    el("div", { class: "hr" }),
-    el("div", { class: "hint" }, [
-      "Sign in to chat with friends, create group DMs, and use simple commands.",
-      el("br"),
-      "This is a work in progress. Don’t share sensitive personal info."
-    ]),
-    el("div", { style: "height:10px" }),
-    el("button", { class: "btn btnPrimary", onclick: openSignInModal }, ["Sign in with Google"])
+  const screen = el("div", { class: "authScreen" });
+  const card = el("div", { class: "authCard" });
+  const banner = el("img", { class: "authBanner", src: BRAND_BANNER, alt: `${BRAND_NAME} banner` });
+
+  const brand = el("div", { class: "authBrand" }, [
+    el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` }),
+    el("div", { class: "authTitle", text: APP_NAME }),
+    el("div", { class: "authSubtitle" }, [
+      "Made by ",
+      el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [BRAND_NAME]),
+      "."
+    ])
   ]);
 
-  root.appendChild(wrap);
+  const copy = el("div", { class: "hint" }, [
+    "Sign in to chat with friends, create group DMs, and use simple commands.",
+    el("br"),
+    "This is a work in progress. Don’t share sensitive personal info."
+  ]);
+
+  const signInBtn = el("button", { class: "googleBtn", onclick: openSignInModal, "aria-label": "Sign in with Google" }, [
+    el("img", { src: GOOGLE_SIGNIN_IMG, alt: "Sign in with Google" })
+  ]);
+
+  const adSlot = el("div", { class: "adSlot" }, ["Ad space"]);
+
+  card.appendChild(banner);
+  card.appendChild(brand);
+  card.appendChild(copy);
+  card.appendChild(signInBtn);
+  card.appendChild(adSlot);
+  screen.appendChild(card);
+  root.appendChild(screen);
+}
+
+function renderLoadingScreen() {
+  clear(root);
+
+  const screen = el("div", { class: "authScreen" });
+  const card = el("div", { class: "authCard" });
+  const banner = el("img", { class: "authBanner", src: BRAND_BANNER, alt: `${BRAND_NAME} banner` });
+
+  const brand = el("div", { class: "authBrand" }, [
+    el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` }),
+    el("div", { class: "authTitle", text: APP_NAME }),
+    el("div", { class: "authSubtitle", text: "Loading your chat experience..." })
+  ]);
+
+  const adSlot = el("div", { class: "adSlot" }, ["Ad space"]);
+
+  card.appendChild(banner);
+  card.appendChild(brand);
+  card.appendChild(adSlot);
+  screen.appendChild(card);
+  root.appendChild(screen);
 }
 
 function renderShell() {
@@ -1420,6 +1657,8 @@ function clearChatListeners() {
   if (S.typingUnsub) { try { S.typingUnsub(); } catch {} S.typingUnsub = null; }
   for (const u of S.presenceUnsubs) { try { u(); } catch {} }
   S.presenceUnsubs = [];
+  for (const u of S.reactionUnsubs) { try { u(); } catch {} }
+  S.reactionUnsubs = [];
 }
 
 function linkifyAndEmoji(htmlAlreadyEscaped) {
@@ -1449,6 +1688,47 @@ function renderMessageContent(text) {
   return safe;
 }
 
+function reactionBasePath(scopeType, scopeId, msgKey) {
+  const base = scopeType === "dm" ? "dmMessages" : "groupDmMessages";
+  return `${base}/${scopeId}/${msgKey}/reactions`;
+}
+
+async function toggleReaction(scopeType, scopeId, msgKey, emoji) {
+  if (!S.uid) return;
+  const reactionRef = ref(db, `${reactionBasePath(scopeType, scopeId, msgKey)}/${emoji}/${S.uid}`);
+  try {
+    const snap = await get(reactionRef);
+    if (snap.exists()) await remove(reactionRef);
+    else await set(reactionRef, true);
+  } catch {}
+}
+
+function subscribeReactions(scopeType, scopeId, msgKey, summaryNode, buttonMap) {
+  const rRef = ref(db, reactionBasePath(scopeType, scopeId, msgKey));
+  const handler = onValue(rRef, (snap) => {
+    const data = snap.val() || {};
+    const totals = {};
+    const myReactions = new Set();
+
+    for (const [emoji, users] of Object.entries(data)) {
+      const count = users ? Object.keys(users).length : 0;
+      if (count > 0) totals[emoji] = count;
+      if (users && users[S.uid]) myReactions.add(emoji);
+    }
+
+    summaryNode.innerHTML = "";
+    Object.entries(totals).forEach(([emoji, count]) => {
+      summaryNode.appendChild(el("div", { class: "reactionChip" }, [`${emoji} ${count}`]));
+    });
+
+    buttonMap.forEach((btn, emoji) => {
+      btn.classList.toggle("active", myReactions.has(emoji));
+    });
+  });
+
+  S.reactionUnsubs.push(() => off(rRef, "value", handler));
+}
+
 function addMessageToUI(msg) {
   const messages = S.ui.messages;
   if (!messages) return;
@@ -1456,13 +1736,44 @@ function addMessageToUI(msg) {
   const isMe = msg.authorId === S.uid;
   const row = el("div", { class: `msgRow ${isMe ? "me" : ""}` });
 
-  const bubble = el("div", { class: "msgBubble" }, [
-    el("div", { html: renderMessageContent(msg.content || "") }),
-    el("div", { class: "msgMeta" }, [
-      el("span", { class: "msgAuthor", text: msg.authorDisplay || "User" }),
-      el("span", { class: "msgCode", text: formatTime(msg.createdAt || nowMs()) })
-    ])
+  const content = el("div", { html: renderMessageContent(msg.content || "") });
+  const meta = el("div", { class: "msgMeta" }, [
+    el("span", { class: "msgAuthor", text: msg.authorDisplay || "User" }),
+    el("span", { class: "msgCode", text: formatTime(msg.createdAt || nowMs()) })
   ]);
+
+  const bubble = el("div", { class: "msgBubble" }, [content, meta]);
+
+  if (msg.scopeType && msg.scopeId && msg.msgKey) {
+    const actions = el("div", { class: "msgActions" });
+    const summary = el("div", { class: "reactionSummary" });
+    const btnMap = new Map();
+
+    REACTION_EMOJIS.forEach((emoji) => {
+      const btn = el("button", { class: "reactionBtn", text: emoji });
+      btn.addEventListener("click", () => toggleReaction(msg.scopeType, msg.scopeId, msg.msgKey, emoji));
+      btnMap.set(emoji, btn);
+      actions.appendChild(btn);
+    });
+
+    let lastTap = 0;
+    bubble.addEventListener("touchend", () => {
+      const now = Date.now();
+      if (now - lastTap < 300) {
+        toggleReaction(msg.scopeType, msg.scopeId, msg.msgKey, QUICK_REACTION);
+        lastTap = 0;
+      } else {
+        lastTap = now;
+      }
+    });
+    bubble.addEventListener("dblclick", () => {
+      toggleReaction(msg.scopeType, msg.scopeId, msg.msgKey, QUICK_REACTION);
+    });
+
+    bubble.appendChild(actions);
+    bubble.appendChild(summary);
+    subscribeReactions(msg.scopeType, msg.scopeId, msg.msgKey, summary, btnMap);
+  }
 
   row.appendChild(bubble);
   messages.appendChild(row);
@@ -1588,7 +1899,10 @@ async function subscribeMessagesDm(dmId) {
       authorId: v.authorId,
       authorDisplay,
       content: v.content || "",
-      createdAt: v.createdAt || nowMs()
+      createdAt: v.createdAt || nowMs(),
+      scopeType: "dm",
+      scopeId: dmId,
+      msgKey
     });
 
     await update(ref(db, `users/${S.uid}/chatRefs/${sk}`), {
@@ -1626,7 +1940,10 @@ async function subscribeMessagesGroup(groupId) {
       authorId: v.authorId,
       authorDisplay,
       content: v.content || "",
-      createdAt: v.createdAt || nowMs()
+      createdAt: v.createdAt || nowMs(),
+      scopeType: "group",
+      scopeId: groupId,
+      msgKey
     });
 
     await update(ref(db, `users/${S.uid}/chatRefs/${sk}`), {
@@ -1664,6 +1981,10 @@ function onComposerInput() {
   if (!S.isTyping && t.length > 0) {
     S.isTyping = true;
     setMyTyping(true);
+  }
+  if (S.isTyping && t.length === 0) {
+    S.isTyping = false;
+    setMyTyping(false);
   }
 
   if (S.typingTimer) clearTimeout(S.typingTimer);
@@ -2141,12 +2462,9 @@ async function refreshFriendsAndRequests() {
   renderFriendRequests();
 }
 
-async function refreshChats() {
-  const snap = await get(ref(db, `users/${S.uid}/chatRefs`));
-  const refsObj = snap.exists() ? (snap.val() || {}) : {};
-
+function hydrateChatRefs(refsObj = {}) {
   const out = [];
-  for (const [k, v] of Object.entries(refsObj)) {
+  for (const v of Object.values(refsObj)) {
     if (!v) continue;
     const key = scopeKey(v.type, v.id);
     const st = S.chatState?.[key] || {};
@@ -2161,9 +2479,14 @@ async function refreshChats() {
       unread: st.unread || 0
     });
   }
-
   S.chats = out;
   renderChatList();
+}
+
+async function refreshChats() {
+  const snap = await get(ref(db, `users/${S.uid}/chatRefs`));
+  const refsObj = snap.exists() ? (snap.val() || {}) : {};
+  hydrateChatRefs(refsObj);
 }
 
 async function refreshAll() {
@@ -2172,6 +2495,32 @@ async function refreshAll() {
   await refreshFriendsAndRequests();
   await refreshChats();
   await updateUnreadCounts().catch(() => {});
+}
+
+function subscribeUserData() {
+  if (S.userDataUnsub) { try { S.userDataUnsub(); } catch {} }
+  const userRef = ref(db, `users/${S.uid}`);
+  const handler = onValue(userRef, (snap) => {
+    if (!snap.exists()) return;
+    const u = snap.val() || {};
+    S.profile = u;
+    if (S.ui?.meName) S.ui.meName.textContent = S.profile?.displayNameDisplay || "User";
+    S.friendRequestsIn = u.friendRequestsIn || {};
+    S.friends = u.friends || {};
+    if (u.chatState) S.chatState = u.chatState;
+    renderFriendRequests();
+  });
+  S.userDataUnsub = () => off(userRef, "value", handler);
+}
+
+function subscribeChatRefs() {
+  if (S.chatRefsUnsub) { try { S.chatRefsUnsub(); } catch {} }
+  const refPath = ref(db, `users/${S.uid}/chatRefs`);
+  const handler = onValue(refPath, (snap) => {
+    const refsObj = snap.exists() ? (snap.val() || {}) : {};
+    hydrateChatRefs(refsObj);
+  });
+  S.chatRefsUnsub = () => off(refPath, "value", handler);
 }
 
 function renderChatList() {
@@ -2219,6 +2568,18 @@ function renderChatList() {
 /* ---------------------------
    AUTH BOOTSTRAP
 ---------------------------- */
+renderLoadingScreen();
+
+async function handleRedirectResult() {
+  try {
+    await getRedirectResult(auth);
+  } catch {
+    showToast("Sign-in redirect failed. Try again.", "error");
+  }
+}
+
+handleRedirectResult().catch(() => {});
+
 onAuthStateChanged(auth, async (user) => {
   try {
     if (!user) {
@@ -2234,6 +2595,8 @@ onAuthStateChanged(auth, async (user) => {
       S._nameCache = {};
       S._seenMsgKeys = {};
       clearChatListeners();
+      if (S.userDataUnsub) { try { S.userDataUnsub(); } catch {} S.userDataUnsub = null; }
+      if (S.chatRefsUnsub) { try { S.chatRefsUnsub(); } catch {} S.chatRefsUnsub = null; }
       applyTheme(DEFAULT_THEME);
       renderSignedOut();
       return;
@@ -2257,6 +2620,8 @@ onAuthStateChanged(auth, async (user) => {
     applyTheme(S.profile?.theme || DEFAULT_THEME);
     renderShell();
 
+    subscribeUserData();
+    subscribeChatRefs();
     await refreshAll();
 
     // Keep lastSeen updated sometimes
