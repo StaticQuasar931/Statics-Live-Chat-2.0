@@ -29,6 +29,7 @@ import {
   limitToLast,
   equalTo
 } from "https://www.gstatic.com/firebasejs/11.5.0/firebase-database.js";
+import NAME_BLOCKLIST from "./name-blocklist.js";
 
 /* ---------------------------
    CONFIG
@@ -45,6 +46,7 @@ const firebaseConfig = {
 };
 
 const APP_NAME = "ChattyChatFace";
+const APP_SECONDARY_NAME = "Static's Live Chatting 2.0";
 const BRAND_NAME = "StaticQuasar931";
 const BRAND_LINK = "https://sites.google.com/view/staticquasar931/gm3z";
 
@@ -65,11 +67,6 @@ const GOOGLE_SIGNIN_IMG = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@ma
 
 const REACTION_EMOJIS = ["❤️", "👍", "😂", "🔥", "🎉", "😮"];
 const QUICK_REACTION = "❤️";
-
-const NAME_BLOCKLIST = [
-  "admin", "moderator", "owner", "staff", "support", "system",
-  "slur", "hate", "kill", "sex", "porn", "nazi", "terror"
-];
 const NAME_WORDS = [
   "starlit", "nebula", "lively", "forest", "crystal", "sunset",
   "ember", "prism", "shadow", "galaxy", "arcade", "silver",
@@ -101,7 +98,7 @@ const SHORTCODES = {
 };
 
 // Custom Static emoji (image)
-const STATIC_EMOJI_URL = "https://drive.google.com/uc?export=view&id=1XBUaPAIDuwV9Ln2Wqx0lztG4QO_dyjhp";
+const STATIC_EMOJI_URL = BRAND_ICON;
 
 /* ---------------------------
    INIT
@@ -112,6 +109,7 @@ const db = getDatabase(app);
 
 const root = document.getElementById("app");
 injectVisualSeo();
+document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
 
 /* ---------------------------
    CSS injection (UI is fully in JS)
@@ -303,7 +301,7 @@ injectVisualSeo();
     padding:6px 10px;
     border: 1px solid var(--border);
     border-radius:999px;
-    background: rgba(0,0,0,.12);
+    background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
     font-size:12px;
     color:var(--muted);
   }
@@ -327,8 +325,8 @@ injectVisualSeo();
     border: 1px solid var(--border);
     border-radius: 16px;
     padding:10px 12px;
-    background: rgba(0,0,0,.12);
-    box-shadow: 0 10px 18px rgba(0,0,0,.12);
+    background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.08));
+    box-shadow: 0 10px 18px rgba(0,0,0,.2);
   }
   .msgRow.me .msgBubble{
     background: rgba(106,167,255,.12);
@@ -764,7 +762,14 @@ function normalizeDisplayName(name) {
 
 function containsBlockedName(name) {
   const n = normalizeDisplayName(name);
-  return NAME_BLOCKLIST.some((bad) => n.includes(bad));
+  return NAME_BLOCKLIST.some((badRaw) => {
+    const bad = String(badRaw || "").toLowerCase().trim();
+    if (!bad) return false;
+    if (bad.length <= 3) {
+      return new RegExp(`\\b${bad}\\b`, "i").test(n);
+    }
+    return n.includes(bad);
+  });
 }
 
 function validateDisplayName(name) {
@@ -844,6 +849,21 @@ function insertAtCursor(textarea, text) {
   textarea.focus();
 }
 
+function replaceShortcodesInInput(textarea) {
+  if (!textarea) return;
+  const value = textarea.value;
+  if (!value.endsWith(" ")) return;
+  const parts = value.split(/\s+/);
+  const last = parts[parts.length - 2];
+  if (!last || !last.startsWith(":") || !last.endsWith(":")) return;
+  const key = last.toLowerCase();
+  const replacement = key === ":static:" ? ":static:" : (SHORTCODES[key] || null);
+  if (!replacement) return;
+  const before = value.slice(0, value.lastIndexOf(last));
+  const after = value.slice(value.lastIndexOf(last) + last.length);
+  const next = `${before}${replacement}${after}`;
+  textarea.value = next;
+}
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -934,7 +954,14 @@ function modalBase(titleText) {
   function close() {
     backdrop.remove();
     modal.remove();
+    document.removeEventListener("keydown", onKeydown);
   }
+
+  function onKeydown(ev) {
+    if (ev.key === "Escape") close();
+  }
+  backdrop.addEventListener("click", close);
+  document.addEventListener("keydown", onKeydown);
 
   document.body.appendChild(backdrop);
   document.body.appendChild(modal);
@@ -1032,8 +1059,8 @@ function injectVisualSeo() {
   ]);
 
   const hidden = el("div", { id: "visualSeoHidden", class: "seo-hidden", "aria-hidden": "true" }, [
-    el("h1", { text: "Static Visual SEO default" }),
-    el("p", { text: "Top-left Static Menu and bottom-right rotating widget by StaticQuasar931." })
+    el("h1", { text: `${APP_NAME} (${APP_SECONDARY_NAME})` }),
+    el("p", { text: "Static Visual SEO default. Static menu and rotating widget by StaticQuasar931." })
   ]);
 
   document.body.appendChild(menu);
@@ -1120,8 +1147,9 @@ function scopeKey(type, id) {
 }
 
 function avatarUrlFor(userObj) {
+  const useGoogle = S.profile?.settings?.useGoogleAvatar !== false;
   const p = userObj?.photoURL;
-  if (p && String(p).trim()) return p;
+  if (useGoogle && p && String(p).trim()) return p;
   const dn = userObj?.displayNameDisplay || "User";
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(dn)}&background=0D8ABC&color=fff&size=128&rounded=true`;
 }
@@ -1500,6 +1528,7 @@ function renderSignedOut() {
       el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` })
     ]),
     el("div", { class: "authTitle", text: APP_NAME }),
+    el("div", { class: "small", text: APP_SECONDARY_NAME }),
     el("div", { class: "authSubtitle" }, [
       "Made by ",
       el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [BRAND_NAME]),
@@ -1542,6 +1571,7 @@ function renderLoadingScreen() {
       el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` })
     ]),
     el("div", { class: "authTitle", text: APP_NAME }),
+    el("div", { class: "small", text: APP_SECONDARY_NAME }),
     el("div", { class: "authSubtitle", text: "Loading your chat experience..." })
   ]);
 
@@ -1607,7 +1637,7 @@ function renderShell() {
       el("b", { id: "meName", text: S.profile?.displayNameDisplay || "User" })
     ]),
     el("button", { class: "iconBtn", title: "Group Info", onclick: openGroupInfoModal }, ["ℹ️"]),
-    el("button", { class: "iconBtn", title: "Theme", onclick: openThemeModal }, [svgPalette()]),
+    el("button", { class: "iconBtn", id: "themeBtn", title: "Theme", onclick: openThemeModal }, [svgPalette()]),
     el("button", { class: "iconBtn", title: "Settings", onclick: openSettingsModal }, [svgGear()])
   ]);
   topBar.appendChild(topLeft);
@@ -1647,7 +1677,9 @@ function renderShell() {
     chatTitle: topBar.querySelector("#chatTitle"),
     chatSub: topBar.querySelector("#chatSub"),
     chatCode: null,
+    themeBtn: topBar.querySelector("#themeBtn"),
     meName: topBar.querySelector("#meName"),
+    mePill: topBar.querySelector("#mePill"),
     messages,
     msgBox: composer.querySelector("#msgBox"),
     sendBtn: composer.querySelector("#sendBtn"),
@@ -1659,6 +1691,50 @@ function renderShell() {
   S.ui.searchChats.addEventListener("input", () => renderChatList());
   S.ui.msgBox.addEventListener("keydown", onComposerKeyDown);
   S.ui.msgBox.addEventListener("input", onComposerInput);
+  S.ui.mePill.addEventListener("click", () => openSettingsModal());
+  S.ui.mePill.addEventListener("contextmenu", (ev) => {
+    ev.preventDefault();
+    showContextMenu(ev.clientX, ev.clientY, [
+      {
+        label: "Copy display name",
+        onClick: async () => {
+          try {
+            await navigator.clipboard.writeText(String(S.profile?.displayNameDisplay || ""));
+            showToast("Display name copied.", "ok");
+          } catch {
+            showToast("Copy failed.", "error");
+          }
+        }
+      }
+    ]);
+  });
+  S.ui.themeBtn.addEventListener("contextmenu", (ev) => {
+    ev.preventDefault();
+    showContextMenu(ev.clientX, ev.clientY, [
+      {
+        label: "Random theme",
+        onClick: async () => {
+          const pick = THEMES[Math.floor(Math.random() * THEMES.length)];
+          applyTheme(pick);
+          await saveThemeToCloud(pick);
+          showToast(`Theme set to ${pick}.`, "ok");
+        }
+      },
+      {
+        label: "Theme tips",
+        onClick: () => showToast("Themes update all menus and panels instantly.", "info")
+      }
+    ]);
+  });
+  S.ui.chatSub.addEventListener("click", async () => {
+    if (S.active?.type !== "group" || !S.active?.joinCode) return;
+    try {
+      await navigator.clipboard.writeText(String(S.active.joinCode));
+      showToast("Join code copied.", "ok");
+    } catch {
+      showToast("Copy failed.", "error");
+    }
+  });
   S.ui.shell.addEventListener("contextmenu", (ev) => {
     if (!ev.target.closest(".chatItem")) return;
     ev.preventDefault();
@@ -1668,7 +1744,7 @@ function renderShell() {
   });
 
   renderSystemMessage(
-    `Welcome to ${APP_NAME}! Use /help for commands. Made by ${BRAND_NAME}.`,
+    `Welcome to ${APP_NAME} (${APP_SECONDARY_NAME})! Use /help for commands. Made by ${BRAND_NAME}.`,
     true
   );
 }
@@ -2035,6 +2111,9 @@ function renderMessageContent(text) {
     return SHORTCODES[key] ? escapeHtml(SHORTCODES[key]) : m;
   });
 
+  safe = safe.replace(/\bStatic\b/gi, `<a href="${BRAND_LINK}" target="_blank" rel="noopener">Static</a>`);
+  safe = safe.replace(/\bGTA\b/gi, `<a href="https://sites.google.com/view/staticquasar931/gm3z/vice-city-grand-theft-auto?utm_source=livechatting2" target="_blank" rel="noopener">GTA</a>`);
+
   safe = linkifyAndEmoji(safe);
   safe = safe.replaceAll("\n", "<br/>");
   return safe;
@@ -2086,7 +2165,8 @@ function addMessageToUI(msg) {
   if (!messages) return;
 
   const isMe = msg.authorId === S.uid;
-  const row = el("div", { class: `msgRow ${isMe ? "me" : ""}` });
+  const isSystem = String(msg.content || "").startsWith("🧩");
+  const row = el("div", { class: `msgRow ${isSystem ? "system" : (isMe ? "me" : "")}` });
 
   const content = el("div", { html: renderMessageContent(msg.content || "") });
   const meta = el("div", { class: "msgMeta" }, [
@@ -2210,9 +2290,14 @@ async function openChat(chat) {
 
   if (S.ui.chatTitle) S.ui.chatTitle.textContent = S.active.name;
   if (S.ui.chatSub) {
-    S.ui.chatSub.textContent = S.active.type === "group"
-      ? `Group DM • Join code: ${S.active.joinCode || "—"}`
-      : "DM";
+    if (S.active.type === "group") {
+      const names = await Promise.all(S.active.members.slice(0, 4).map(getAuthorDisplay));
+      const extra = S.active.members.length > names.length ? ` +${S.active.members.length - names.length}` : "";
+      const memberLine = names.length ? ` • Members: ${names.join(", ")}${extra}` : "";
+      S.ui.chatSub.textContent = `Group DM • Join code: ${S.active.joinCode || "—"}${memberLine}`;
+    } else {
+      S.ui.chatSub.textContent = "DM";
+    }
   }
 
   await markActiveReadNow();
@@ -2333,6 +2418,7 @@ function onComposerKeyDown(e) {
 function onComposerInput() {
   const t = String(S.ui.msgBox.value || "");
   S.ui.countLine.textContent = `${t.length} / ${MAX_MESSAGE_CHARS}`;
+  replaceShortcodesInInput(S.ui.msgBox);
 
   if (!S.active) return;
 
@@ -2412,6 +2498,22 @@ async function onSendClicked() {
 /* ---------------------------
    COMMANDS + REPORTS (simple)
 ---------------------------- */
+const TRUTH_PROMPTS = [
+  "What is your favorite game of all time?",
+  "What’s a secret talent you have?",
+  "What’s the last song you played on repeat?",
+  "If you could teleport anywhere, where would you go?",
+  "What’s your favorite movie or show right now?"
+];
+
+const DARE_PROMPTS = [
+  "Send a message using only emojis.",
+  "Type your next message in ALL CAPS.",
+  "Share a fun fact about yourself.",
+  "Say hello in three different languages.",
+  "Post your favorite emoji three times."
+];
+
 async function postSystemToActive(text) {
   if (!S.active) return;
   const msgObj = { authorId: S.uid, content: `🧩 ${text}`, createdAt: nowMs() };
@@ -2426,16 +2528,24 @@ async function handleCommand(cmdRaw) {
   const cmd = (parts[0] || "").toLowerCase();
 
   if (cmd === "/help") {
-    await postSystemToActive("Commands: /help, /coinflip, /roll [sides], /hidechat, /unhidechat, /leave, /report <reason>");
+    await postSystemToActive("Commands: /help, /coinflip (/cf), /roll [sides], /tod, /hidechat, /unhidechat, /leave, /report <reason>");
     return;
   }
-  if (cmd === "/coinflip") {
+  if (cmd === "/coinflip" || cmd === "/cf") {
     await postSystemToActive(`🪙 Coin flip: ${Math.random() < 0.5 ? "Heads" : "Tails"}`);
     return;
   }
   if (cmd === "/roll") {
     const sides = clamp(parseInt(parts[1] || "6", 10) || 6, 2, 1000);
     await postSystemToActive(`🎲 Rolled d${sides}: ${Math.floor(Math.random() * sides) + 1}`);
+    return;
+  }
+  if (cmd === "/tod") {
+    const pickTruth = Math.random() < 0.5;
+    const prompt = pickTruth
+      ? TRUTH_PROMPTS[Math.floor(Math.random() * TRUTH_PROMPTS.length)]
+      : DARE_PROMPTS[Math.floor(Math.random() * DARE_PROMPTS.length)];
+    await postSystemToActive(`${pickTruth ? "Truth" : "Dare"}: ${prompt}`);
     return;
   }
   if (cmd === "/hidechat") {
@@ -2604,6 +2714,7 @@ function openNewChatModal() {
 
   const groupTitle = el("div", { class: "hint", text: "Create Group DM" });
   const groupName = el("input", { class: "input", placeholder: "Group name..." });
+  const createBtn = el("button", { class: "btn btnPrimary" }, ["Create Group"]);
 
   const memberWrap = el("div", { style: "display:flex; flex-direction:column; gap:8px; max-height: 180px; overflow:auto;" });
   const memberChecks = new Map();
@@ -2621,7 +2732,6 @@ function openNewChatModal() {
     memberWrap.appendChild(el("div", { class: "small", text: "Add friends to invite them to a group." }));
   }
 
-  const createBtn = el("button", { class: "btn btnPrimary" }, ["Create Group"]);
   const createErr = el("div", { class: "hint" });
 
   createBtn.addEventListener("click", async () => {
@@ -2646,6 +2756,7 @@ function openNewChatModal() {
   });
 
   const joinTitle = el("div", { class: "hint", text: "Join Group by Code" });
+  const joinRow = el("div", { style: "display:flex; gap:8px; align-items:center;" });
   const joinInput = el("input", { class: "input", placeholder: "6-digit code..." });
   const joinBtn = el("button", { class: "btn" }, ["Join Group"]);
   const joinErr = el("div", { class: "hint" });
@@ -2674,19 +2785,30 @@ function openNewChatModal() {
   m.body.appendChild(dmList);
   m.body.appendChild(el("div", { class: "hr" }));
   m.body.appendChild(groupTitle);
-  m.body.appendChild(groupName);
+  m.body.appendChild(el("div", { style: "display:flex; gap:8px; align-items:center;" }, [groupName, createBtn]));
   m.body.appendChild(memberWrap);
   m.body.appendChild(createErr);
   m.body.appendChild(el("div", { class: "hr" }));
   m.body.appendChild(joinTitle);
-  m.body.appendChild(joinInput);
+  joinRow.appendChild(joinInput);
+  joinRow.appendChild(joinBtn);
+  m.body.appendChild(joinRow);
   m.body.appendChild(joinErr);
-  m.footer.appendChild(el("div", { class: "row" }, [cancelBtn, joinBtn, createBtn]));
+  m.footer.appendChild(el("div", { class: "row" }, [cancelBtn]));
 }
 
 function openEmojiModal() {
   const m = modalBase("Emoji Picker");
   const grid = el("div", { class: "emojiGrid" });
+
+  const staticBtn = el("button", { class: "emojiBtn", title: ":static:" }, [
+    el("img", { src: STATIC_EMOJI_URL, alt: ":static:", style: "width:24px;height:24px;border-radius:8px;" })
+  ]);
+  staticBtn.addEventListener("click", () => {
+    insertAtCursor(S.ui?.msgBox, ":static:");
+    onComposerInput();
+  });
+  grid.appendChild(staticBtn);
 
   EMOJI_LIST.forEach((emoji) => {
     const btn = el("button", { class: "emojiBtn" }, [emoji]);
@@ -2697,7 +2819,7 @@ function openEmojiModal() {
     grid.appendChild(btn);
   });
 
-  const hint = el("div", { class: "hint", text: "Click an emoji to insert it into your message." });
+  const hint = el("div", { class: "hint", text: "Click an emoji to insert it into your message. Shortcodes like :static: and :skull: auto-convert when you type a space." });
   const closeBtn = el("button", { class: "btn" }, ["Close"]);
   closeBtn.addEventListener("click", () => m.close());
 
@@ -2820,6 +2942,18 @@ function openSettingsModal() {
     }
   });
 
+  const avatarRow = el("label", { style: "display:flex; align-items:center; gap:8px;" }, [
+    el("input", { type: "checkbox" }),
+    el("span", { text: "Use Google profile photo as avatar (recommended)" })
+  ]);
+  const avatarToggle = avatarRow.querySelector("input");
+  avatarToggle.checked = S.profile?.settings?.useGoogleAvatar !== false;
+  avatarToggle.addEventListener("change", async () => {
+    await update(ref(db, `users/${S.uid}/settings`), { useGoogleAvatar: avatarToggle.checked }).catch(() => {});
+    showToast("Avatar setting updated.", "ok");
+    await refreshChats();
+  });
+
   const hiddenTitle = el("div", { class: "hint", text: "Hidden Chats" });
   const hiddenWrap = el("div", { style: "display:flex; flex-direction:column; gap:8px;" });
   const hidden = (S.chats || []).filter(c => c.hidden);
@@ -2847,6 +2981,7 @@ function openSettingsModal() {
   m.body.appendChild(profileRow);
   m.body.appendChild(el("div", { class: "hr" }));
   m.body.appendChild(nameBtn);
+  m.body.appendChild(avatarRow);
   m.body.appendChild(signOutBtn);
   m.body.appendChild(el("div", { class: "hr" }));
 
@@ -2901,7 +3036,32 @@ async function refreshFriendsAndRequests() {
   S.friendRequestsIn = reqIn;
   S.friends = friends;
 
+  syncFriendProfiles().catch(() => {});
   renderFriendRequests();
+}
+
+async function syncFriendProfiles() {
+  const reqs = Object.values(S.friendRequestsIn || {});
+  const friends = Object.values(S.friends || {});
+
+  for (const req of reqs) {
+    if (!req?.fromUid) continue;
+    const snap = await get(ref(db, `publicUsers/${req.fromUid}`));
+    if (snap.exists()) {
+      const u = snap.val() || {};
+      req.fromDisplay = u.displayNameDisplay || req.fromDisplay;
+    }
+  }
+
+  for (const friend of friends) {
+    if (!friend?.uid) continue;
+    const snap = await get(ref(db, `publicUsers/${friend.uid}`));
+    if (snap.exists()) {
+      const u = snap.val() || {};
+      friend.displayNameDisplay = u.displayNameDisplay || friend.displayNameDisplay;
+      friend.photoURL = u.photoURL || friend.photoURL;
+    }
+  }
 }
 
 function hydrateChatRefs(refsObj = {}) {
@@ -2950,6 +3110,7 @@ function subscribeUserData() {
     S.friendRequestsIn = u.friendRequestsIn || {};
     S.friends = u.friends || {};
     if (u.chatState) S.chatState = u.chatState;
+    syncFriendProfiles().catch(() => {});
     renderFriendRequests();
   });
   S.userDataUnsub = () => off(userRef, "value", handler);
