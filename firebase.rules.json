@@ -6,94 +6,47 @@
     "users": {
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
-        ".write": "auth != null && auth.uid === $uid",
-        ".validate": "newData.exists() && (!newData.child('uid').exists() || newData.child('uid').val() === $uid)",
-
-        "chatRefs": {
-          "$refId": {
-            ".validate": "newData.hasChildren(['type','id','name','lastAt'])"
-          }
-        },
-        "chatState": {
-          "$refId": {
-            ".validate": "newData.hasChildren(['lastReadAt'])"
-          }
-        },
-        "friendRequestsIn": {
-          "$fromUid": { ".validate": "newData.hasChildren(['fromUid','fromDisplay','createdAt'])" }
-        },
-        "friendRequestsOut": {
-          "$toUid": { ".validate": "newData.hasChildren(['toUid','toDisplay','createdAt'])" }
-        },
-        "friends": {
-          "$friendUid": { ".validate": "newData.hasChildren(['uid','displayNameDisplay','since'])" }
-        },
-        "blocks": {
-          "$blockedUid": { ".validate": "newData.val() === true || !newData.exists()" }
-        },
-        "settings": { ".validate": "newData.exists()" },
-        "nameHistory": { ".validate": "newData.exists()" }
+        ".write": "auth != null && auth.uid === $uid"
       }
     },
 
     "publicUsers": {
       "$uid": {
         ".read": "auth != null",
-        ".write": "auth != null && auth.uid === $uid",
-        ".validate": "newData.exists()"
+        ".write": "auth != null && auth.uid === $uid"
       }
     },
 
     "dms": {
       "$dmId": {
-        ".read": "auth != null && data.child('memberIds/' + auth.uid).val() === true",
-        ".write": "auth != null && ((!data.exists() && newData.child('memberIds/' + auth.uid).val() === true) || (data.exists() && data.child('memberIds/' + auth.uid).val() === true))",
-        ".validate": "newData.exists() && newData.child('memberIds').hasChildren()"
+        ".read": "auth != null",
+        ".write": "auth != null"
       }
     },
 
     "dmMessages": {
       "$dmId": {
         "$messageId": {
-          ".read": "auth != null && root.child('dms/' + $dmId + '/memberIds/' + auth.uid).val() === true",
-          ".write": "auth != null && root.child('dms/' + $dmId + '/memberIds/' + auth.uid).val() === true && ((!data.exists() && newData.child('authorId').val() === auth.uid) || (data.exists() && data.child('authorId').val() === auth.uid))",
-          ".validate": "(!newData.exists() && data.child('authorId').val() === auth.uid) || (newData.exists() && newData.hasChildren(['authorId','content','createdAt']) && newData.child('authorId').isString() && newData.child('content').isString() && newData.child('createdAt').isNumber() && newData.child('content').val().length <= 4000 && (data.exists() ? (newData.child('authorId').val() === data.child('authorId').val() && newData.child('createdAt').val() === data.child('createdAt').val()) : (newData.child('authorId').val() === auth.uid && newData.child('createdAt').val() <= now)))",
-
-          "reactions": {
-            "$emoji": {
-              "$uid": {
-                ".write": "auth != null && auth.uid === $uid && root.child('dms/' + $dmId + '/memberIds/' + auth.uid).val() === true",
-                ".validate": "newData.val() === true || !newData.exists()"
-              }
-            }
-          }
+          ".read": "auth != null",
+          ".write": "auth != null && newData.child('authorId').val() === auth.uid",
+          ".validate": "newData.exists() && newData.hasChildren(['authorId','content','createdAt'])"
         }
       }
     },
 
     "groupDms": {
       "$groupId": {
-        ".read": "auth != null && (data.child('memberIds/' + auth.uid).val() === true || (query.orderByChild === 'code' && query.equalTo === data.child('code').val()))",
-        ".write": "auth != null && ((!data.exists() && newData.child('memberIds/' + auth.uid).val() === true) || (data.exists() && data.child('memberIds/' + auth.uid).val() === true))",
-        ".validate": "newData.exists() && newData.child('memberIds').hasChildren() && newData.child('name').isString()"
+        ".read": "auth != null",
+        ".write": "auth != null"
       }
     },
 
     "groupDmMessages": {
       "$groupId": {
         "$messageId": {
-          ".read": "auth != null && root.child('groupDms/' + $groupId + '/memberIds/' + auth.uid).val() === true",
-          ".write": "auth != null && root.child('groupDms/' + $groupId + '/memberIds/' + auth.uid).val() === true && ((!data.exists() && newData.child('authorId').val() === auth.uid) || (data.exists() && data.child('authorId').val() === auth.uid))",
-          ".validate": "(!newData.exists() && data.child('authorId').val() === auth.uid) || (newData.exists() && newData.hasChildren(['authorId','content','createdAt']) && newData.child('authorId').isString() && newData.child('content').isString() && newData.child('createdAt').isNumber() && newData.child('content').val().length <= 4000 && (data.exists() ? (newData.child('authorId').val() === data.child('authorId').val() && newData.child('createdAt').val() === data.child('createdAt').val()) : (newData.child('authorId').val() === auth.uid && newData.child('createdAt').val() <= now)))",
-
-          "reactions": {
-            "$emoji": {
-              "$uid": {
-                ".write": "auth != null && auth.uid === $uid && root.child('groupDms/' + $groupId + '/memberIds/' + auth.uid).val() === true",
-                ".validate": "newData.val() === true || !newData.exists()"
-              }
-            }
-          }
+          ".read": "auth != null",
+          ".write": "auth != null && newData.child('authorId').val() === auth.uid",
+          ".validate": "newData.exists() && newData.hasChildren(['authorId','content','createdAt'])"
         }
       }
     },
@@ -101,8 +54,7 @@
     "presence": {
       "$uid": {
         ".read": "auth != null",
-        ".write": "auth != null && auth.uid === $uid",
-        ".validate": "newData.exists()"
+        ".write": "auth != null && auth.uid === $uid"
       }
     },
 
@@ -110,9 +62,8 @@
       "$scopeType": {
         "$scopeId": {
           "$uid": {
-            ".read": "auth != null && (($scopeType === 'dm' && root.child('dms/' + $scopeId + '/memberIds/' + auth.uid).val() === true) || ($scopeType === 'group' && root.child('groupDms/' + $scopeId + '/memberIds/' + auth.uid).val() === true))",
-            ".write": "auth != null && auth.uid === $uid",
-            ".validate": "newData.exists()"
+            ".read": "auth != null",
+            ".write": "auth != null && auth.uid === $uid"
           }
         }
       }
@@ -122,7 +73,7 @@
       "$reportId": {
         ".read": "auth != null && root.child('admins/' + auth.uid).val() === true",
         ".write": "auth != null",
-        ".validate": "newData.exists() && newData.hasChildren(['createdBy','createdAt','type','details']) && newData.child('createdBy').val() === auth.uid && newData.child('createdAt').isNumber() && newData.child('type').isString() && newData.child('details').isString() && newData.child('details').val().length <= 8000"
+        ".validate": "newData.exists() && newData.hasChildren(['createdBy','createdAt','type','details']) && newData.child('createdBy').val() === auth.uid"
       }
     },
 
