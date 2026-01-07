@@ -66,6 +66,18 @@ const GOOGLE_SIGNIN_IMG = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@ma
 const REACTION_EMOJIS = ["❤️", "👍", "😂", "🔥", "🎉", "😮"];
 const QUICK_REACTION = "❤️";
 
+const NAME_BLOCKLIST = [
+  "admin", "moderator", "owner", "staff", "support", "system",
+  "slur", "hate", "kill", "sex", "porn", "nazi", "terror"
+];
+const NAME_WORDS = [
+  "starlit", "nebula", "lively", "forest", "crystal", "sunset",
+  "ember", "prism", "shadow", "galaxy", "arcade", "silver",
+  "lunar", "spark", "aurora", "comet", "planet", "nova",
+  "breeze", "glimmer", "bright", "marble", "signal", "vertex",
+  "tundra", "legend", "cobalt", "magnet", "spline", "rocket"
+];
+
 // Unicode emoji list for picker
 const EMOJI_LIST = [
   "😀","😁","😂","🤣","😅","😊","😍","😘","😎","🤔","😳","😴","😭","😡","🤯","🥳",
@@ -750,12 +762,45 @@ function normalizeDisplayName(name) {
   return String(name || "").trim().toLowerCase();
 }
 
+function containsBlockedName(name) {
+  const n = normalizeDisplayName(name);
+  return NAME_BLOCKLIST.some((bad) => n.includes(bad));
+}
+
 function validateDisplayName(name) {
   const raw = String(name || "").trim();
   if (raw.length < DISPLAY_MIN) return `Display name must be at least ${DISPLAY_MIN} characters.`;
   if (raw.length > DISPLAY_MAX) return `Display name must be at most ${DISPLAY_MAX} characters.`;
   if (!DISPLAY_REGEX.test(raw)) return "Display name can only use letters, numbers, and . _ - (no spaces).";
+  if (containsBlockedName(raw)) return "That display name is not allowed.";
   return null;
+}
+
+function randomDigits(count = 4) {
+  let out = "";
+  for (let i = 0; i < count; i += 1) out += Math.floor(Math.random() * 10);
+  return out;
+}
+
+function buildRandomName() {
+  const wordCount = Math.random() < 0.5 ? 1 : 2;
+  const words = [];
+  for (let i = 0; i < wordCount; i += 1) {
+    const w = NAME_WORDS[Math.floor(Math.random() * NAME_WORDS.length)];
+    words.push(w);
+  }
+  const base = words.join("").slice(0, 15);
+  return `${base}${randomDigits(4)}`;
+}
+
+async function generateUniqueDisplayName() {
+  for (let i = 0; i < 12; i += 1) {
+    const candidate = buildRandomName();
+    if (validateDisplayName(candidate)) continue;
+    const taken = await isDisplayNameTaken(normalizeDisplayName(candidate), S.uid);
+    if (!taken) return candidate;
+  }
+  return `user${randomDigits(4)}`;
 }
 
 function escapeHtml(s) {
@@ -919,20 +964,23 @@ function injectVisualSeo() {
       --seo-shadow:0 10px 30px rgba(0,0,0,.4);
     }
     #staticMenu{
-      position:fixed; left:12px; top:12px; z-index:9999;
+      position:fixed; left:12px; bottom:12px; z-index:9999;
       display:flex; gap:10px; align-items:center; user-select:none;
       padding:10px 14px; border-radius:12px;
       background:linear-gradient(135deg, rgba(20,20,28,.9), rgba(20,20,28,.6));
       border:1px solid rgba(94,225,255,.35);
       color:#e8f3ff; box-shadow:var(--seo-glow), var(--seo-shadow);
-      font-size:14px; animation:menuEnter .6s ease .15s both;
+      font-size:14px; animation:menuCorner 1.2s ease .2s both;
     }
     #staticMenu a{ color:#5ee1ff; font-weight:800; text-decoration:none }
     #closeStaticMenu{
       color:#f55; cursor:pointer; padding:2px 6px; border-radius:6px;
       border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.06)
     }
-    @keyframes menuEnter{ from{opacity:0; transform:translateY(-8px)} to{opacity:1; transform:translateY(0)} }
+    @keyframes menuCorner{
+      from{opacity:0; transform:translateY(-160px)}
+      to{opacity:1; transform:translateY(0)}
+    }
 
     #staticSlideMenu{
       position:fixed; bottom:24px; right:24px; z-index:9999;
@@ -1294,6 +1342,42 @@ async function isDisplayNameTaken(normalized, myUid) {
   return false;
 }
 
+async function applyDisplayName(nextName, previousName, reason) {
+  const raw = String(nextName || "").trim();
+  const normalized = normalizeDisplayName(raw);
+  const prev = String(previousName || "").trim();
+  const history = S.profile?.nameHistory || { current: null, previous: [] };
+  const prevList = Array.isArray(history.previous) ? history.previous.slice(0) : [];
+  if (prev && prev !== raw) prevList.unshift({ name: prev, at: nowMs() });
+
+  const nameHistory = {
+    current: raw,
+    previous: prevList.slice(0, 12)
+  };
+
+  await update(ref(db, `users/${S.uid}`), {
+    displayNameDisplay: raw,
+    displayNameNormalized: normalized,
+    nameHistory,
+    nameChangeLog: {
+      from: prev || null,
+      to: raw,
+      reason: reason || "update",
+      at: nowMs()
+    }
+  });
+
+  await update(ref(db, `publicUsers/${S.uid}`), {
+    uid: S.uid,
+    displayNameDisplay: raw,
+    displayNameNormalized: normalized,
+    photoURL: S.user?.photoURL || null,
+    lastSeen: nowMs(),
+    status: "online",
+    nameHistory
+  });
+}
+
 function openDisplayNameModal(user) {
   const m = modalBase("Choose your display name");
 
@@ -1313,6 +1397,7 @@ function openDisplayNameModal(user) {
     autocomplete: "off",
     spellcheck: "false"
   });
+  input.value = S.profile?.displayNameDisplay || "";
 
   const err = el("div", { class: "hint", id: "dnErr" });
 
@@ -1323,7 +1408,13 @@ function openDisplayNameModal(user) {
     err.textContent = "";
     const raw = input.value || "";
     const v = validateDisplayName(raw);
-    if (v) { err.textContent = v; return; }
+    if (v) {
+      const auto = await generateUniqueDisplayName();
+      await applyDisplayName(auto, raw, "auto-generated");
+      showToast("Name updated with a safe default.", "ok");
+      m.close();
+      return;
+    }
 
     const normalized = normalizeDisplayName(raw);
 
@@ -1333,27 +1424,15 @@ function openDisplayNameModal(user) {
     try {
       const taken = await isDisplayNameTaken(normalized, user.uid);
       if (taken) {
-        saveBtn.disabled = false;
-        saveBtn.textContent = "Save";
-        err.textContent = "That display name is already taken.";
+        const auto = await generateUniqueDisplayName();
+        await applyDisplayName(auto, raw, "auto-generated");
+        showToast("That name was taken. A new one was picked.", "ok");
+        m.close();
         return;
       }
 
       saveBtn.textContent = "Saving...";
-
-      await update(ref(db, `users/${user.uid}`), {
-        displayNameDisplay: raw,
-        displayNameNormalized: normalized
-      });
-
-      await update(ref(db, `publicUsers/${user.uid}`), {
-        uid: user.uid,
-        displayNameDisplay: raw,
-        displayNameNormalized: normalized,
-        photoURL: user.photoURL || null,
-        lastSeen: nowMs(),
-        status: "online"
-      });
+      await applyDisplayName(raw, S.profile?.displayNameDisplay || "", "user-update");
 
       m.close();
       showToast("Display name saved.", "ok");
@@ -1527,6 +1606,7 @@ function renderShell() {
       el("span", { text: "You:" }),
       el("b", { id: "meName", text: S.profile?.displayNameDisplay || "User" })
     ]),
+    el("button", { class: "iconBtn", title: "Group Info", onclick: openGroupInfoModal }, ["ℹ️"]),
     el("button", { class: "iconBtn", title: "Theme", onclick: openThemeModal }, [svgPalette()]),
     el("button", { class: "iconBtn", title: "Settings", onclick: openSettingsModal }, [svgGear()])
   ]);
@@ -1834,6 +1914,7 @@ async function createGroupDm(groupName, memberUids) {
   await set(ref(db, `groupDms/${groupId}`), {
     createdAt: nowMs(),
     createdBy: S.uid,
+    ownerId: S.uid,
     name,
     code,
     memberIds
@@ -1904,6 +1985,19 @@ async function leaveGroup(groupId) {
     clearChatListeners();
     renderSystemMessage("You left the group.", true);
     renderChatList();
+  }
+}
+
+async function kickGroupMember(groupId, memberUid) {
+  try {
+    await remove(ref(db, `groupDms/${groupId}/memberIds/${memberUid}`));
+    await push(ref(db, `groupDmMessages/${groupId}`), {
+      authorId: S.uid,
+      content: `🚪 ${S.profile.displayNameDisplay} removed a member.`,
+      createdAt: nowMs()
+    }).catch(() => {});
+  } catch {
+    showToast("Failed to remove member.", "error");
   }
 }
 
@@ -2107,6 +2201,7 @@ async function openChat(chat) {
     S.active.members = memberIds;
     S.active.name = g.name || chat.name || "Group DM";
     S.active.joinCode = g.code || "";
+    S.active.ownerId = g.ownerId || g.createdBy || "";
 
     await upsertMyChatRef("group", chat.id, S.active.name, null, nowMs(), "Group DM");
     await subscribeMessagesGroup(chat.id);
@@ -2611,6 +2706,66 @@ function openEmojiModal() {
   m.footer.appendChild(el("div", { class: "row" }, [closeBtn]));
 }
 
+async function openGroupInfoModal() {
+  if (!S.active || S.active.type !== "group") {
+    showToast("Open a group chat first.", "warn");
+    return;
+  }
+
+  const groupSnap = await get(ref(db, `groupDms/${S.active.id}`));
+  if (!groupSnap.exists()) {
+    showToast("Group info unavailable.", "error");
+    return;
+  }
+  const g = groupSnap.val() || {};
+
+  const m = modalBase("Group Info");
+  const joinRow = el("div", { class: "row", style: "justify-content:space-between;" }, [
+    el("div", { class: "hint", text: `Join code: ${g.code || "—"}` }),
+    el("button", { class: "btn" }, ["Copy"])
+  ]);
+  joinRow.querySelector("button").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(String(g.code || ""));
+      showToast("Join code copied.", "ok");
+    } catch {
+      showToast("Copy failed.", "error");
+    }
+  });
+
+  const membersWrap = el("div", { style: "display:flex; flex-direction:column; gap:8px;" });
+  const memberIds = Object.keys(g.memberIds || {}).filter((uid) => g.memberIds[uid] === true);
+  const isOwner = g.ownerId === S.uid;
+
+  for (const uid of memberIds) {
+    const name = await getAuthorDisplay(uid);
+    const row = el("div", { style: "display:flex; align-items:center; justify-content:space-between; gap:8px;" }, [
+      el("span", { text: uid === g.ownerId ? `${name} (owner)` : name }),
+      isOwner && uid !== g.ownerId
+        ? el("button", { class: "btn" }, ["Kick"])
+        : el("span", { class: "small", text: uid === g.ownerId ? "Owner" : "" })
+    ]);
+    const kickBtn = row.querySelector("button");
+    if (kickBtn) {
+      kickBtn.addEventListener("click", async () => {
+        await kickGroupMember(S.active.id, uid);
+        row.remove();
+      });
+    }
+    membersWrap.appendChild(row);
+  }
+
+  const closeBtn = el("button", { class: "btn" }, ["Close"]);
+  closeBtn.addEventListener("click", () => m.close());
+
+  m.body.appendChild(el("div", { class: "hint", text: g.name || "Group DM" }));
+  m.body.appendChild(joinRow);
+  m.body.appendChild(el("div", { class: "hr" }));
+  m.body.appendChild(el("div", { class: "hint", text: "Members" }));
+  m.body.appendChild(membersWrap);
+  m.footer.appendChild(el("div", { class: "row" }, [closeBtn]));
+}
+
 function openThemeModal() {
   const m = modalBase("Theme");
   const hint = el("div", { class: "hint", text: "Choose a theme. It syncs to your profile." });
@@ -2894,6 +3049,10 @@ function openChatContextMenu(x, y, chat) {
       onClick: () => blockUser(otherUid)
     });
   } else {
+    items.push({
+      label: "Group info",
+      onClick: () => openGroupInfoModal()
+    });
     items.push({
       label: "Leave group",
       danger: true,
