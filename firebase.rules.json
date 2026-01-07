@@ -7,7 +7,32 @@
       "$uid": {
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid",
-        ".validate": "newData.exists() && (!newData.child('uid').exists() || newData.child('uid').val() === $uid)"
+        ".validate": "newData.exists() && (!newData.child('uid').exists() || newData.child('uid').val() === $uid)",
+
+        "chatRefs": {
+          "$refId": {
+            ".validate": "newData.hasChildren(['type','id','name','lastAt'])"
+          }
+        },
+        "chatState": {
+          "$refId": {
+            ".validate": "newData.hasChildren(['lastReadAt'])"
+          }
+        },
+        "friendRequestsIn": {
+          "$fromUid": { ".validate": "newData.hasChildren(['fromUid','fromDisplay','createdAt'])" }
+        },
+        "friendRequestsOut": {
+          "$toUid": { ".validate": "newData.hasChildren(['toUid','toDisplay','createdAt'])" }
+        },
+        "friends": {
+          "$friendUid": { ".validate": "newData.hasChildren(['uid','displayNameDisplay','since'])" }
+        },
+        "blocks": {
+          "$blockedUid": { ".validate": "newData.val() === true || !newData.exists()" }
+        },
+        "settings": { ".validate": "newData.exists()" },
+        "nameHistory": { ".validate": "newData.exists()" }
       }
     },
 
@@ -16,59 +41,6 @@
         ".read": "auth != null",
         ".write": "auth != null && auth.uid === $uid",
         ".validate": "newData.exists()"
-      }
-    },
-
-    "servers": {
-      "$serverId": {
-        ".read": "auth != null && data.child('members/' + auth.uid).exists()",
-        ".write": "auth != null && ((!data.exists() && newData.child('members/' + auth.uid).exists()) || (data.exists() && data.child('members/' + auth.uid + '/perms/manageServer').val() === true))",
-        ".validate": "newData.exists()",
-
-        "members": {
-          "$uid": {
-            ".read": "auth != null && root.child('servers/' + $serverId + '/members/' + auth.uid).exists()",
-
-            ".write": "auth != null && (auth.uid === $uid || root.child('servers/' + $serverId + '/members/' + auth.uid + '/perms/manageMembers').val() === true)",
-
-            ".validate": "newData.exists()",
-
-            "perms": {
-              ".write": "auth != null && root.child('servers/' + $serverId + '/members/' + auth.uid + '/perms/manageMembers').val() === true",
-              ".validate": "newData.exists()"
-            }
-          }
-        },
-
-        "roles": {
-          "$roleId": {
-            ".read": "auth != null && root.child('servers/' + $serverId + '/members/' + auth.uid).exists()",
-            ".write": "auth != null && root.child('servers/' + $serverId + '/members/' + auth.uid + '/perms/manageRoles').val() === true",
-            ".validate": "newData.exists()"
-          }
-        },
-
-        "channels": {
-          "$channelId": {
-            ".read": "auth != null && root.child('servers/' + $serverId + '/members/' + auth.uid).exists()",
-            ".write": "auth != null && root.child('servers/' + $serverId + '/members/' + auth.uid + '/perms/manageChannels').val() === true",
-            ".validate": "newData.exists()"
-          }
-        }
-      }
-    },
-
-    "serverMessages": {
-      "$serverId": {
-        "$channelId": {
-          ".read": "auth != null && root.child('servers/' + $serverId + '/members/' + auth.uid).exists() && root.child('servers/' + $serverId + '/channels/' + $channelId).exists()",
-
-          "$messageId": {
-            ".write": "auth != null && root.child('servers/' + $serverId + '/members/' + auth.uid).exists() && root.child('servers/' + $serverId + '/channels/' + $channelId).exists() && ((!data.exists() && newData.child('authorId').val() === auth.uid) || (data.exists() && (data.child('authorId').val() === auth.uid || root.child('servers/' + $serverId + '/members/' + auth.uid + '/perms/manageMessages').val() === true)))",
-
-            ".validate": "(!newData.exists() && (data.child('authorId').val() === auth.uid || root.child('servers/' + $serverId + '/members/' + auth.uid + '/perms/manageMessages').val() === true)) || (newData.exists() && newData.hasChildren(['authorId','content','createdAt']) && newData.child('authorId').isString() && newData.child('content').isString() && newData.child('createdAt').isNumber() && newData.child('content').val().length <= 4000 && (data.exists() ? (newData.child('authorId').val() === data.child('authorId').val() && newData.child('createdAt').val() === data.child('createdAt').val()) : (newData.child('authorId').val() === auth.uid && newData.child('createdAt').val() <= now)))"
-          }
-        }
       }
     },
 
@@ -103,7 +75,7 @@
       "$groupId": {
         ".read": "auth != null && (data.child('memberIds/' + auth.uid).val() === true || (query.orderByChild === 'code' && query.equalTo === data.child('code').val()))",
         ".write": "auth != null && ((!data.exists() && newData.child('memberIds/' + auth.uid).val() === true) || (data.exists() && data.child('memberIds/' + auth.uid).val() === true))",
-        ".validate": "newData.exists() && newData.child('memberIds').hasChildren()"
+        ".validate": "newData.exists() && newData.child('memberIds').hasChildren() && newData.child('name').isString()"
       }
     },
 
@@ -138,19 +110,11 @@
       "$scopeType": {
         "$scopeId": {
           "$uid": {
-            ".read": "auth != null && (($scopeType === 'dm' && root.child('dms/' + $scopeId + '/memberIds/' + auth.uid).val() === true) || ($scopeType === 'group' && root.child('groupDms/' + $scopeId + '/memberIds/' + auth.uid).val() === true) || ($scopeType === 'server' && root.child('servers/' + $scopeId + '/members/' + auth.uid).exists()))",
+            ".read": "auth != null && (($scopeType === 'dm' && root.child('dms/' + $scopeId + '/memberIds/' + auth.uid).val() === true) || ($scopeType === 'group' && root.child('groupDms/' + $scopeId + '/memberIds/' + auth.uid).val() === true))",
             ".write": "auth != null && auth.uid === $uid",
             ".validate": "newData.exists()"
           }
         }
-      }
-    },
-
-    "invites": {
-      "$inviteId": {
-        ".read": "auth != null",
-        ".write": "auth != null && ((!data.exists() && newData.hasChildren(['serverId','createdBy','createdAt','usesLeft']) && newData.child('createdBy').val() === auth.uid && root.child('servers/' + newData.child('serverId').val() + '/members/' + auth.uid + '/perms/manageInvites').val() === true) || (data.exists() && root.child('servers/' + data.child('serverId').val() + '/members/' + auth.uid + '/perms/manageInvites').val() === true))",
-        ".validate": "newData.exists() && newData.hasChildren(['serverId','createdBy','createdAt','usesLeft']) && newData.child('serverId').isString() && newData.child('createdBy').isString() && newData.child('createdAt').isNumber() && newData.child('usesLeft').isNumber() && newData.child('usesLeft').val() >= 0"
       }
     },
 
