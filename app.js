@@ -61,7 +61,7 @@ const DISPLAY_REGEX = /^[A-Za-z0-9._-]+$/; // no spaces
 
 const BRAND_ICON = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/icon.png";
 const BRAND_BANNER = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/StaticQuasar931_Banner_Media_Google_Sites_Neon_ChatGPT_Image.png";
-const GOOGLE_SIGNIN_IMG = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/Screenshot_2025-11-24_162537-removebg-preview.png";
+const GOOGLE_SIGNIN_IMG = "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/Sign%20up%20with%20Google%20SQUARE%20TRANSPARENT.png";
 
 const REACTION_EMOJIS = ["❤️", "👍", "😂", "🔥", "🎉", "😮"];
 const QUICK_REACTION = "❤️";
@@ -99,6 +99,7 @@ const auth = getAuth(app);
 const db = getDatabase(app);
 
 const root = document.getElementById("app");
+injectVisualSeo();
 
 /* ---------------------------
    CSS injection (UI is fully in JS)
@@ -146,6 +147,18 @@ const root = document.getElementById("app");
     gap:16px;
     text-align:center;
   }
+  .authCardGlow{
+    position: relative;
+    overflow: hidden;
+  }
+  .authCardGlow::before{
+    content:"";
+    position:absolute;
+    inset:-120px -80px auto;
+    height:240px;
+    background: radial-gradient(circle, rgba(106,167,255,.2), transparent 60%);
+    pointer-events:none;
+  }
   .authBanner{
     width: 100%;
     border-radius: 18px;
@@ -184,13 +197,14 @@ const root = document.getElementById("app");
     border-radius: 16px;
     padding: 8px 16px;
     cursor:pointer;
+    box-shadow: 0 10px 20px rgba(0,0,0,.25);
   }
   .googleBtn:disabled{
     opacity: .6;
     cursor:not-allowed;
   }
   .googleBtn img{
-    height: 44px;
+    height: 52px;
     width: auto;
     display:block;
   }
@@ -203,13 +217,7 @@ const root = document.getElementById("app");
   }
   .adSlot{
     height: 90px;
-    border: 1px dashed var(--border);
     border-radius: 16px;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-    color: var(--muted);
-    font-size: 12px;
   }
 
   .appShell{
@@ -520,6 +528,30 @@ const root = document.getElementById("app");
   .toast-warn{ border-color: rgba(255,204,102,.45); }
   .toast-error{ border-color: rgba(255,77,77,.45); }
 
+  .contextMenu{
+    position: fixed;
+    z-index: 9999;
+    min-width: 180px;
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    background: rgba(10,12,20,.95);
+    box-shadow: var(--shadow);
+    padding: 6px;
+  }
+  .contextItem{
+    width: 100%;
+    text-align: left;
+    border: none;
+    background: transparent;
+    color: var(--text);
+    padding: 8px 10px;
+    border-radius: 10px;
+    cursor: pointer;
+    font-size: 13px;
+  }
+  .contextItem:hover{ background: rgba(255,255,255,.08); }
+  .contextItem.danger{ color: var(--danger); }
+
   .reqItem{
     display:flex; align-items:center; justify-content:space-between; gap:10px;
     padding:10px;
@@ -787,6 +819,41 @@ function clear(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
+function hideContextMenu() {
+  const existing = document.getElementById("contextMenu");
+  if (existing) existing.remove();
+}
+
+function showContextMenu(x, y, items = []) {
+  hideContextMenu();
+  const menu = el("div", { id: "contextMenu", class: "contextMenu" });
+  items.forEach((item) => {
+    const btn = el("button", {
+      class: `contextItem${item.danger ? " danger" : ""}`,
+      text: item.label
+    });
+    btn.addEventListener("click", () => {
+      hideContextMenu();
+      item.onClick?.();
+    });
+    menu.appendChild(btn);
+  });
+  document.body.appendChild(menu);
+  const rect = menu.getBoundingClientRect();
+  const maxX = window.innerWidth - rect.width - 8;
+  const maxY = window.innerHeight - rect.height - 8;
+  menu.style.left = `${Math.max(8, Math.min(x, maxX))}px`;
+  menu.style.top = `${Math.max(8, Math.min(y, maxY))}px`;
+
+  const onDocClick = (evt) => {
+    if (!menu.contains(evt.target)) {
+      hideContextMenu();
+      document.removeEventListener("click", onDocClick);
+    }
+  };
+  document.addEventListener("click", onDocClick);
+}
+
 function showToast(msg, kind = "info") {
   const wrap = document.getElementById("toastWrap") || el("div", { id: "toastWrap", class: "toastWrap" });
   if (!wrap.parentNode) document.body.appendChild(wrap);
@@ -830,6 +897,176 @@ function modalBase(titleText) {
   return { backdrop, modal, card, header, body, footer, close };
 }
 
+function toggleVisualSeo(force) {
+  const ids = ["staticMenu", "staticSlideMenu", "visualSeoHidden"];
+  ids.forEach((id) => {
+    const node = document.getElementById(id);
+    if (!node) return;
+    const isHidden = node.style.display === "none";
+    const shouldShow = typeof force === "boolean" ? force : isHidden;
+    node.style.display = shouldShow ? (id === "staticMenu" ? "flex" : "block") : "none";
+  });
+}
+
+function injectVisualSeo() {
+  if (document.getElementById("staticMenu")) return;
+
+  const style = document.createElement("style");
+  style.textContent = `
+    :root{
+      --seo-brand:#5ee1ff;
+      --seo-glow:0 0 12px rgba(94,225,255,.65), 0 0 32px rgba(155,255,183,.35);
+      --seo-shadow:0 10px 30px rgba(0,0,0,.4);
+    }
+    #staticMenu{
+      position:fixed; left:12px; top:12px; z-index:9999;
+      display:flex; gap:10px; align-items:center; user-select:none;
+      padding:10px 14px; border-radius:12px;
+      background:linear-gradient(135deg, rgba(20,20,28,.9), rgba(20,20,28,.6));
+      border:1px solid rgba(94,225,255,.35);
+      color:#e8f3ff; box-shadow:var(--seo-glow), var(--seo-shadow);
+      font-size:14px; animation:menuEnter .6s ease .15s both;
+    }
+    #staticMenu a{ color:#5ee1ff; font-weight:800; text-decoration:none }
+    #closeStaticMenu{
+      color:#f55; cursor:pointer; padding:2px 6px; border-radius:6px;
+      border:1px solid rgba(255,255,255,.15); background:rgba(255,255,255,.06)
+    }
+    @keyframes menuEnter{ from{opacity:0; transform:translateY(-8px)} to{opacity:1; transform:translateY(0)} }
+
+    #staticSlideMenu{
+      position:fixed; bottom:24px; right:24px; z-index:9999;
+      width:100px; height:100px; pointer-events:none; opacity:0;
+      transform:translateX(140px) scale(.96);
+    }
+    #staticSlideMenu a{ display:block; width:100%; height:100% }
+    #staticSlideMenu img{
+      width:100%; height:100%; object-fit:contain;
+      border:0; border-radius:0; background:transparent; box-shadow:none;
+      transition:opacity .25s ease;
+    }
+    .slide-in{ animation:slideIn 2s ease forwards }
+    .slide-out{ animation:slideOut 2s ease forwards }
+    @keyframes slideIn{ from{opacity:0; transform:translateX(140px) scale(.96)} to{opacity:1; transform:translateX(0) scale(1)} }
+    @keyframes slideOut{ from{opacity:1; transform:translateX(0) scale(1)} to{opacity:0; transform:translateX(140px) scale(.96)} }
+
+    .seo-hidden{
+      position:absolute; width:1px; height:1px; overflow:hidden;
+      clip:rect(1px,1px,1px,1px); white-space:nowrap;
+    }
+
+    @media (max-width:600px){
+      #staticMenu{ font-size:13px; padding:8px 12px }
+      #staticSlideMenu{ width:88px; height:88px }
+    }
+  `;
+  document.head.appendChild(style);
+
+  const menu = el("div", { id: "staticMenu", role: "region", "aria-label": "StaticQuasar menu" }, [
+    el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, ["More Unblocked Games by Static"]),
+    el("span", { id: "closeStaticMenu", title: "Hide temporarily", text: "✕" })
+  ]);
+
+  const slideMenu = el("div", { id: "staticSlideMenu", "aria-live": "polite" }, [
+    el("a", {
+      id: "staticSlideLink",
+      href: "https://sites.google.com/view/staticquasar931/google-form",
+      target: "_blank",
+      rel: "noopener",
+      "aria-label": "Open Google Form"
+    }, [
+      el("img", {
+        id: "staticSlideImg",
+        src: "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/GoogleForm.png",
+        alt: "StaticQuasar931 Google Form for feedback and requests"
+      })
+    ])
+  ]);
+
+  const hidden = el("div", { id: "visualSeoHidden", class: "seo-hidden", "aria-hidden": "true" }, [
+    el("h1", { text: "Static Visual SEO default" }),
+    el("p", { text: "Top-left Static Menu and bottom-right rotating widget by StaticQuasar931." })
+  ]);
+
+  document.body.appendChild(menu);
+  document.body.appendChild(slideMenu);
+  document.body.appendChild(hidden);
+
+  const closeBtn = menu.querySelector("#closeStaticMenu");
+  const key = "sq931_staticMenu_hidden_until";
+  const showMenu = () => { if (menu) menu.style.display = "flex"; };
+  const hideFor3m = () => {
+    if (!menu) return;
+    menu.style.display = "none";
+    const until = Date.now() + 180000;
+    localStorage.setItem(key, String(until));
+    setTimeout(showMenu, 180000);
+  };
+  const until = parseInt(localStorage.getItem(key) || "0", 10);
+  if (until && Date.now() < until) {
+    menu.style.display = "none";
+    setTimeout(showMenu, until - Date.now());
+  } else {
+    showMenu();
+  }
+  if (closeBtn) closeBtn.onclick = hideFor3m;
+
+  const a = slideMenu.querySelector("#staticSlideLink");
+  const img = slideMenu.querySelector("#staticSlideImg");
+  const ROTATION = [
+    {
+      src: "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/GoogleForm.png",
+      alt: "StaticQuasar931 Google Form for feedback and requests",
+      link: "https://sites.google.com/view/staticquasar931/google-form"
+    },
+    {
+      src: "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/Join_Our_DC_StaticQuassar931_lcplrf.png",
+      alt: "Join the StaticQuasar931 Discord",
+      link: "https://discord.gg/DP2hM7RRhR"
+    },
+    {
+      src: "https://cdn.jsdelivr.net/gh/StaticQuasar931/Images@main/Follow-us--IG",
+      alt: "StaticQuasar931 Instagram",
+      link: "https://www.instagram.com/freeschoolgamepage/"
+    }
+  ];
+  ROTATION.forEach((o) => {
+    const preload = new Image();
+    preload.src = o.src;
+  });
+
+  const T_IN = 2000;
+  const T_SHOW = 5000;
+  const T_OUT = 2000;
+  const T_HIDDEN = 20000;
+  let idx = 0;
+
+  function apply(state) {
+    if (!a || !img) return;
+    a.href = state.link;
+    img.alt = state.alt;
+    img.style.opacity = "0";
+    setTimeout(() => { img.src = state.src; }, 80);
+    img.onload = () => { img.style.opacity = "1"; };
+  }
+
+  (async function cycle() {
+    for (;;) {
+      apply(ROTATION[idx]);
+      slideMenu.style.pointerEvents = "auto";
+      slideMenu.classList.remove("slide-out");
+      slideMenu.classList.add("slide-in");
+      await new Promise((r) => setTimeout(r, T_IN + T_SHOW));
+      slideMenu.classList.remove("slide-in");
+      slideMenu.classList.add("slide-out");
+      await new Promise((r) => setTimeout(r, T_OUT));
+      slideMenu.style.pointerEvents = "none";
+      await new Promise((r) => setTimeout(r, T_HIDDEN));
+      idx = (idx + 1) % ROTATION.length;
+    }
+  })();
+}
+
 function scopeKey(type, id) {
   return `${type}:${id}`;
 }
@@ -853,6 +1090,7 @@ function avatarUrlFor(userObj) {
   function toggleGui() {
     document.body.classList.toggle("gui-hidden");
     showToast(document.body.classList.contains("gui-hidden") ? "GUI hidden" : "GUI shown", "info");
+    toggleVisualSeo();
   }
 
   window.addEventListener("keydown", (e) => {
@@ -1014,6 +1252,7 @@ async function ensureUserProfile(user) {
   await update(pubRef, {
     uid,
     displayNameDisplay: snap.exists() ? (snap.val()?.displayNameDisplay || null) : null,
+    displayNameNormalized: snap.exists() ? (snap.val()?.displayNameNormalized || null) : null,
     photoURL: user.photoURL || null,
     lastSeen: nowMs(),
     status: "online"
@@ -1172,11 +1411,15 @@ function renderSignedOut() {
   clear(root);
 
   const screen = el("div", { class: "authScreen" });
-  const card = el("div", { class: "authCard" });
-  const banner = el("img", { class: "authBanner", src: BRAND_BANNER, alt: `${BRAND_NAME} banner` });
+  const card = el("div", { class: "authCard authCardGlow" });
+  const bannerLink = el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
+    el("img", { class: "authBanner", src: BRAND_BANNER, alt: `${BRAND_NAME} banner` })
+  ]);
 
   const brand = el("div", { class: "authBrand" }, [
-    el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` }),
+    el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
+      el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` })
+    ]),
     el("div", { class: "authTitle", text: APP_NAME }),
     el("div", { class: "authSubtitle" }, [
       "Made by ",
@@ -1195,9 +1438,9 @@ function renderSignedOut() {
     el("img", { src: GOOGLE_SIGNIN_IMG, alt: "Sign in with Google" })
   ]);
 
-  const adSlot = el("div", { class: "adSlot" }, ["Ad space"]);
+  const adSlot = el("div", { class: "adSlot" });
 
-  card.appendChild(banner);
+  card.appendChild(bannerLink);
   card.appendChild(brand);
   card.appendChild(copy);
   card.appendChild(signInBtn);
@@ -1210,18 +1453,22 @@ function renderLoadingScreen() {
   clear(root);
 
   const screen = el("div", { class: "authScreen" });
-  const card = el("div", { class: "authCard" });
-  const banner = el("img", { class: "authBanner", src: BRAND_BANNER, alt: `${BRAND_NAME} banner` });
+  const card = el("div", { class: "authCard authCardGlow" });
+  const bannerLink = el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
+    el("img", { class: "authBanner", src: BRAND_BANNER, alt: `${BRAND_NAME} banner` })
+  ]);
 
   const brand = el("div", { class: "authBrand" }, [
-    el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` }),
+    el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
+      el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` })
+    ]),
     el("div", { class: "authTitle", text: APP_NAME }),
     el("div", { class: "authSubtitle", text: "Loading your chat experience..." })
   ]);
 
-  const adSlot = el("div", { class: "adSlot" }, ["Ad space"]);
+  const adSlot = el("div", { class: "adSlot" });
 
-  card.appendChild(banner);
+  card.appendChild(bannerLink);
   card.appendChild(brand);
   card.appendChild(adSlot);
   screen.appendChild(card);
@@ -1319,6 +1566,7 @@ function renderShell() {
     searchChats: searchRow.querySelector("#searchChats"),
     chatTitle: topBar.querySelector("#chatTitle"),
     chatSub: topBar.querySelector("#chatSub"),
+    chatCode: null,
     meName: topBar.querySelector("#meName"),
     messages,
     msgBox: composer.querySelector("#msgBox"),
@@ -1331,6 +1579,13 @@ function renderShell() {
   S.ui.searchChats.addEventListener("input", () => renderChatList());
   S.ui.msgBox.addEventListener("keydown", onComposerKeyDown);
   S.ui.msgBox.addEventListener("input", onComposerInput);
+  S.ui.shell.addEventListener("contextmenu", (ev) => {
+    if (!ev.target.closest(".chatItem")) return;
+    ev.preventDefault();
+  });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape") hideContextMenu();
+  });
 
   renderSystemMessage(
     `Welcome to ${APP_NAME}! Use /help for commands. Made by ${BRAND_NAME}.`,
@@ -1414,6 +1669,9 @@ async function sendFriendRequestByDisplayOrEmail(input) {
 
   const fSnap = await get(ref(db, `users/${S.uid}/friends/${targetUid}`));
   if (fSnap.exists()) throw new Error("You are already friends.");
+
+  const blockSnap = await get(ref(db, `users/${S.uid}/blocks/${targetUid}`));
+  if (blockSnap.exists()) throw new Error("You blocked this user.");
 
   await update(ref(db, `users/${S.uid}/friendRequestsOut/${targetUid}`), {
     toUid: targetUid,
@@ -1848,6 +2106,7 @@ async function openChat(chat) {
     const memberIds = Object.keys(g.memberIds || {}).filter(uid => g.memberIds[uid] === true);
     S.active.members = memberIds;
     S.active.name = g.name || chat.name || "Group DM";
+    S.active.joinCode = g.code || "";
 
     await upsertMyChatRef("group", chat.id, S.active.name, null, nowMs(), "Group DM");
     await subscribeMessagesGroup(chat.id);
@@ -1855,7 +2114,11 @@ async function openChat(chat) {
   }
 
   if (S.ui.chatTitle) S.ui.chatTitle.textContent = S.active.name;
-  if (S.ui.chatSub) S.ui.chatSub.textContent = S.active.type === "group" ? "Group DM" : "DM";
+  if (S.ui.chatSub) {
+    S.ui.chatSub.textContent = S.active.type === "group"
+      ? `Group DM • Join code: ${S.active.joinCode || "—"}`
+      : "DM";
+  }
 
   await markActiveReadNow();
   renderChatList();
@@ -2431,8 +2694,32 @@ function openSettingsModal() {
   m.body.appendChild(nameBtn);
   m.body.appendChild(signOutBtn);
   m.body.appendChild(el("div", { class: "hr" }));
+
+  const blockedTitle = el("div", { class: "hint", text: "Blocked Users" });
+  const blockedWrap = el("div", { style: "display:flex; flex-direction:column; gap:8px;" });
+  const blocked = S.profile?.blocks ? Object.entries(S.profile.blocks) : [];
+  if (!blocked.length) {
+    blockedWrap.appendChild(el("div", { class: "small", text: "No blocked users." }));
+  } else {
+    blocked.forEach(([uid]) => {
+      const row = el("div", { style: "display:flex; gap:8px; align-items:center; justify-content:space-between;" }, [
+        el("span", { text: S._nameCache[uid] || uid }),
+        el("button", { class: "btn" }, ["Unblock"])
+      ]);
+      row.querySelector("button").addEventListener("click", async () => {
+        await remove(ref(db, `users/${S.uid}/blocks/${uid}`));
+        showToast("User unblocked.", "ok");
+        row.remove();
+      });
+      blockedWrap.appendChild(row);
+    });
+  }
+  m.body.appendChild(el("div", { class: "hr" }));
   m.body.appendChild(hiddenTitle);
   m.body.appendChild(hiddenWrap);
+  m.body.appendChild(el("div", { class: "hr" }));
+  m.body.appendChild(blockedTitle);
+  m.body.appendChild(blockedWrap);
   m.footer.appendChild(el("div", { class: "row" }, [closeBtn]));
 }
 
@@ -2530,6 +2817,7 @@ function renderChatList() {
 
   const filter = normalizeDisplayName(S.ui.searchChats.value || "");
   const visible = (S.chats || [])
+    .filter(c => !(S.profile?.blocks && S.profile.blocks[getOtherUidFromChat(c)]))
     .filter(c => !c.hidden)
     .filter(c => !filter || normalizeDisplayName(c.name).includes(filter))
     .sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0));
@@ -2542,6 +2830,10 @@ function renderChatList() {
   for (const c of visible) {
     const active = S.active && S.active.type === c.type && S.active.id === c.id;
     const item = el("div", { class: `chatItem ${active ? "active" : ""}`, onclick: () => openChat(c) });
+    item.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      openChatContextMenu(ev.clientX, ev.clientY, c);
+    });
 
     const av = el("div", { class: "avatar" }, [
       el("img", { src: c.photoURL || avatarUrlFor({ displayNameDisplay: c.name }), alt: "" })
@@ -2563,6 +2855,61 @@ function renderChatList() {
 
     list.appendChild(item);
   }
+}
+
+function getOtherUidFromChat(chat) {
+  if (!chat || chat.type !== "dm") return null;
+  const parts = String(chat.id || "").split("_");
+  return parts.find((p) => p && p !== S.uid) || null;
+}
+
+async function blockUser(uid) {
+  if (!uid) return;
+  await set(ref(db, `users/${S.uid}/blocks/${uid}`), true).catch(() => {});
+  await hideChatRef("dm", deterministicDmId(S.uid, uid)).catch(() => {});
+  showToast("User blocked.", "ok");
+  await refreshChats();
+}
+
+async function unfriendUser(uid) {
+  if (!uid) return;
+  await remove(ref(db, `users/${S.uid}/friends/${uid}`)).catch(() => {});
+  await hideChatRef("dm", deterministicDmId(S.uid, uid)).catch(() => {});
+  showToast("Friend removed.", "ok");
+  await refreshChats();
+}
+
+function openChatContextMenu(x, y, chat) {
+  const items = [];
+  if (chat.type === "dm") {
+    const otherUid = getOtherUidFromChat(chat);
+    items.push({
+      label: "Unfriend",
+      danger: true,
+      onClick: () => unfriendUser(otherUid)
+    });
+    items.push({
+      label: "Block user",
+      danger: true,
+      onClick: () => blockUser(otherUid)
+    });
+  } else {
+    items.push({
+      label: "Leave group",
+      danger: true,
+      onClick: () => leaveGroup(chat.id)
+    });
+  }
+  items.push({
+    label: "Hide chat",
+    onClick: () => hideChatRef(chat.type, chat.id)
+  });
+  items.push({
+    label: "Report",
+    onClick: () => openReportModal("Report reason...")
+  });
+
+  showContextMenu(x, y, items);
 }
 
 /* ---------------------------
