@@ -205,17 +205,20 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     border: 1px solid var(--border);
     background: rgba(255,255,255,.08);
     border-radius: 16px;
-    padding: 8px 16px;
+    padding: 0;
     cursor:pointer;
     box-shadow: 0 10px 20px rgba(0,0,0,.25);
+    width: 100%;
+    max-width: 320px;
+    overflow: hidden;
   }
   .googleBtn:disabled{
     opacity: .6;
     cursor:not-allowed;
   }
   .googleBtn img{
-    height: 52px;
-    width: auto;
+    width: 100%;
+    height: auto;
     display:block;
   }
   .authFooter{
@@ -760,16 +763,25 @@ function normalizeDisplayName(name) {
   return String(name || "").trim().toLowerCase();
 }
 
-function containsBlockedName(name) {
-  const n = normalizeDisplayName(name);
-  return NAME_BLOCKLIST.some((badRaw) => {
+function normalizeRepeatedChars(value) {
+  return value.replace(/(.)\1+/g, "$1");
+}
+
+function findBlockedWord(name) {
+  const raw = normalizeDisplayName(name);
+  const squashed = normalizeRepeatedChars(raw);
+
+  return NAME_BLOCKLIST.find((badRaw) => {
     const bad = String(badRaw || "").toLowerCase().trim();
     if (!bad) return false;
-    if (bad.length <= 3) {
-      return new RegExp(`\\b${bad}\\b`, "i").test(n);
-    }
-    return n.includes(bad);
-  });
+    const exact = bad.length <= 3 ? new RegExp(`\\b${bad}\\b`, "i") : null;
+    if (exact && (exact.test(raw) || exact.test(squashed))) return true;
+    return raw.includes(bad) || squashed.includes(bad);
+  }) || null;
+}
+
+function containsBlockedName(name) {
+  return !!findBlockedWord(name);
 }
 
 function validateDisplayName(name) {
@@ -934,13 +946,21 @@ function showToast(msg, kind = "info") {
   setTimeout(() => t.remove(), 2800);
 }
 
+function logFirebaseError(context, error) {
+  const code = error?.code || "unknown";
+  const message = error?.message || "Unknown Firebase error";
+  console.error(`[Firebase] ${context}: ${code} - ${message}`, error);
+  showToast(`Firebase error (${context}). Check console.`, "error");
+}
+
 function modalBase(titleText) {
   const backdrop = el("div", { class: "backdrop" });
   const modal = el("div", { class: "modal", role: "dialog", "aria-modal": "true" });
   const card = el("div", { class: "modalCard" });
 
   const header = el("div", { class: "modalHeader" }, [
-    el("div", { class: "modalTitle", text: titleText })
+    el("div", { class: "modalTitle", text: titleText }),
+    el("button", { class: "btn", text: "✕", "aria-label": "Close" })
   ]);
 
   const body = el("div", { class: "modalBody" });
@@ -958,8 +978,12 @@ function modalBase(titleText) {
   }
 
   function onKeydown(ev) {
-    if (ev.key === "Escape") close();
+    const key = String(ev.key || "").toLowerCase();
+    if (key === "escape" || (key === "x" && !(ev.target instanceof HTMLInputElement) && !(ev.target instanceof HTMLTextAreaElement))) {
+      close();
+    }
   }
+  header.querySelector("button").addEventListener("click", close);
   backdrop.addEventListener("click", close);
   document.addEventListener("keydown", onKeydown);
 
@@ -998,6 +1022,11 @@ function injectVisualSeo() {
       border:1px solid rgba(94,225,255,.35);
       color:#e8f3ff; box-shadow:var(--seo-glow), var(--seo-shadow);
       font-size:14px; animation:menuCorner 1.2s ease .2s both;
+      transition: top .4s ease, bottom .4s ease;
+    }
+    body.auth-screen #staticMenu{
+      top:12px;
+      bottom:auto;
     }
     #staticMenu a{ color:#5ee1ff; font-weight:800; text-decoration:none }
     #closeStaticMenu{
@@ -1265,11 +1294,11 @@ function openSignInModal() {
           provider.setCustomParameters({ prompt: "select_account" });
           await signInWithRedirect(auth, provider);
           return;
-        } catch {
-          showToast(getFriendlyAuthError(e), "error");
+        } catch (err) {
+          logFirebaseError("auth-redirect", err);
         }
       } else {
-        showToast(getFriendlyAuthError(e), "error");
+        logFirebaseError("auth-popup", e);
       }
       btn.disabled = false;
     }
@@ -1373,6 +1402,7 @@ async function isDisplayNameTaken(normalized, myUid) {
 async function applyDisplayName(nextName, previousName, reason) {
   const raw = String(nextName || "").trim();
   const normalized = normalizeDisplayName(raw);
+  const previousNormalized = normalizeDisplayName(previousName || "");
   const prev = String(previousName || "").trim();
   const history = S.profile?.nameHistory || { current: null, previous: [] };
   const prevList = Array.isArray(history.previous) ? history.previous.slice(0) : [];
@@ -1404,6 +1434,11 @@ async function applyDisplayName(nextName, previousName, reason) {
     status: "online",
     nameHistory
   });
+
+  if (previousNormalized && previousNormalized !== normalized) {
+    await remove(ref(db, `displayNames/${previousNormalized}`)).catch(() => {});
+  }
+  await set(ref(db, `displayNames/${normalized}`), S.uid);
 }
 
 function openDisplayNameModal(user) {
@@ -1428,6 +1463,20 @@ function openDisplayNameModal(user) {
   input.value = S.profile?.displayNameDisplay || "";
 
   const err = el("div", { class: "hint", id: "dnErr" });
+  const reportWrap = el("div", { class: "row", style: "justify-content:flex-start;" });
+  const reportBtn = el("button", { class: "btn", text: "Report mistake" });
+  reportBtn.classList.add("hidden");
+  reportWrap.appendChild(reportBtn);
+
+  const avatarRow = el("label", { style: "display:flex; align-items:center; gap:8px;" }, [
+    el("input", { type: "checkbox" }),
+    el("span", { text: "Use Google profile photo as account avatar (default)" })
+  ]);
+  const avatarToggle = avatarRow.querySelector("input");
+  avatarToggle.checked = S.profile?.settings?.useGoogleAvatar !== false;
+  avatarToggle.addEventListener("change", async () => {
+    await update(ref(db, `users/${S.uid}/settings`), { useGoogleAvatar: avatarToggle.checked }).catch((e) => logFirebaseError("update-avatar-setting", e));
+  });
 
   const saveBtn = el("button", { class: "btn btnPrimary" }, ["Save"]);
   const cancelBtn = el("button", { class: "btn" }, ["Cancel"]);
@@ -1437,6 +1486,13 @@ function openDisplayNameModal(user) {
     const raw = input.value || "";
     const v = validateDisplayName(raw);
     if (v) {
+      const blocked = findBlockedWord(raw);
+      if (blocked) {
+        err.textContent = "This username contains inappropriate content. If this is a mistake, report it.";
+        reportBtn.classList.remove("hidden");
+        reportBtn.onclick = () => reportNameIssue(raw, blocked);
+        return;
+      }
       const auto = await generateUniqueDisplayName();
       await applyDisplayName(auto, raw, "auto-generated");
       showToast("Name updated with a safe default.", "ok");
@@ -1465,10 +1521,11 @@ function openDisplayNameModal(user) {
       m.close();
       showToast("Display name saved.", "ok");
       await refreshAll();
-    } catch {
+    } catch (e) {
       saveBtn.disabled = false;
       saveBtn.textContent = "Save";
       err.textContent = "Failed to save display name. Try again.";
+      logFirebaseError("save-display-name", e);
     }
   }
 
@@ -1480,9 +1537,32 @@ function openDisplayNameModal(user) {
   cancelBtn.addEventListener("click", () => m.close());
 
   m.body.appendChild(warn);
+  m.body.appendChild(avatarRow);
   m.body.appendChild(input);
   m.body.appendChild(err);
+  m.body.appendChild(reportWrap);
   m.footer.appendChild(el("div", { class: "row" }, [cancelBtn, saveBtn]));
+}
+
+async function reportNameIssue(attemptedName, flaggedWord) {
+  try {
+    const payload = {
+      createdBy: S.uid,
+      createdAt: nowMs(),
+      type: "name",
+      details: JSON.stringify({
+        attemptedName,
+        flaggedWord,
+        reporterDisplay: S.profile?.displayNameDisplay || "User",
+        reporterUid: S.uid
+      }).slice(0, 7800)
+    };
+    const repRef = push(ref(db, "reports"));
+    await set(repRef, payload);
+    showToast("Report sent.", "ok");
+  } catch (e) {
+    logFirebaseError("report-name", e);
+  }
 }
 
 /* ---------------------------
@@ -1516,6 +1596,7 @@ async function saveThemeToCloud(theme) {
 ---------------------------- */
 function renderSignedOut() {
   clear(root);
+  document.body.classList.add("auth-screen");
 
   const screen = el("div", { class: "authScreen" });
   const card = el("div", { class: "authCard authCardGlow" });
@@ -1539,7 +1620,9 @@ function renderSignedOut() {
   const copy = el("div", { class: "hint" }, [
     "Sign in to chat with friends, create group DMs, and use simple commands.",
     el("br"),
-    "This is a work in progress. Don’t share sensitive personal info."
+    "This is a work in progress. Don’t share sensitive personal info.",
+    el("br"),
+    "Your Google profile picture is used as your account avatar by default. You can change this in Settings."
   ]);
 
   const signInBtn = el("button", { class: "googleBtn", onclick: openSignInModal, "aria-label": "Sign in with Google" }, [
@@ -1559,6 +1642,7 @@ function renderSignedOut() {
 
 function renderLoadingScreen() {
   clear(root);
+  document.body.classList.add("auth-screen");
 
   const screen = el("div", { class: "authScreen" });
   const card = el("div", { class: "authCard authCardGlow" });
@@ -1586,6 +1670,7 @@ function renderLoadingScreen() {
 
 function renderShell() {
   clear(root);
+  document.body.classList.remove("auth-screen");
 
   const shell = el("div", { class: "appShell" });
 
@@ -2488,8 +2573,8 @@ async function onSendClicked() {
     await setMyTyping(false);
 
     await markActiveReadNow();
-  } catch {
-    showToast("Failed to send.", "error");
+  } catch (e) {
+    logFirebaseError("send-message", e);
   } finally {
     S.ui.sendBtn.disabled = false;
   }
@@ -2602,11 +2687,13 @@ async function openReportModal(prefillReason = "") {
     send.disabled = true;
     send.textContent = "Sending...";
     try {
+      const category = categorySelect.value || "general";
       const payload = {
         createdBy: S.uid,
         createdAt: nowMs(),
         type: "chat",
         details: JSON.stringify({
+          category,
           reason: reason.value.slice(0, 1500),
           extra: details.value.slice(0, 4000),
           chatType: S.active.type,
@@ -2618,8 +2705,8 @@ async function openReportModal(prefillReason = "") {
       await set(repRef, payload);
       showToast("Report sent.", "ok");
       m.close();
-    } catch {
-      showToast("Failed to send report.", "error");
+    } catch (e) {
+      logFirebaseError("send-report", e);
       send.disabled = false;
       send.textContent = "Send Report";
     }
@@ -2629,6 +2716,15 @@ async function openReportModal(prefillReason = "") {
 
   m.body.appendChild(hint);
   m.body.appendChild(el("div", { class: "hr" }));
+  const categorySelect = el("select", { class: "input" }, [
+    el("option", { value: "general", text: "General" }),
+    el("option", { value: "harassment", text: "Harassment" }),
+    el("option", { value: "spam", text: "Spam" }),
+    el("option", { value: "safety", text: "Safety" }),
+    el("option", { value: "other", text: "Other" })
+  ]);
+  m.body.appendChild(el("div", { class: "hint", text: "Category" }));
+  m.body.appendChild(categorySelect);
   m.body.appendChild(el("div", { class: "hint", text: "Reason" }));
   m.body.appendChild(reason);
   m.body.appendChild(el("div", { class: "hint", text: "Extra" }));
@@ -2663,6 +2759,7 @@ function openAddFriendModal() {
       m.close();
     } catch (e) {
       err.textContent = e?.message || "Failed to send request.";
+      logFirebaseError("send-friend-request", e);
       sendBtn.disabled = false;
       sendBtn.textContent = "Send Request";
     }
@@ -3004,12 +3101,21 @@ function openSettingsModal() {
       blockedWrap.appendChild(row);
     });
   }
-  m.body.appendChild(el("div", { class: "hr" }));
-  m.body.appendChild(hiddenTitle);
-  m.body.appendChild(hiddenWrap);
-  m.body.appendChild(el("div", { class: "hr" }));
-  m.body.appendChild(blockedTitle);
-  m.body.appendChild(blockedWrap);
+  if (!hidden.length && !blocked.length) {
+    const combined = el("div", { style: "display:flex; gap:12px; flex-wrap:wrap;" }, [
+      el("div", { style: "flex:1; min-width:220px;" }, [hiddenTitle, hiddenWrap]),
+      el("div", { style: "flex:1; min-width:220px;" }, [blockedTitle, blockedWrap])
+    ]);
+    m.body.appendChild(el("div", { class: "hr" }));
+    m.body.appendChild(combined);
+  } else {
+    m.body.appendChild(el("div", { class: "hr" }));
+    m.body.appendChild(hiddenTitle);
+    m.body.appendChild(hiddenWrap);
+    m.body.appendChild(el("div", { class: "hr" }));
+    m.body.appendChild(blockedTitle);
+    m.body.appendChild(blockedWrap);
+  }
   m.footer.appendChild(el("div", { class: "row" }, [closeBtn]));
 }
 

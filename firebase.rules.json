@@ -17,6 +17,14 @@
       }
     },
 
+    "displayNames": {
+      "$normalized": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        ".validate": "newData.val() === auth.uid"
+      }
+    },
+
     "dms": {
       "$dmId": {
         ".read": "auth != null",
@@ -29,7 +37,15 @@
         "$messageId": {
           ".read": "auth != null",
           ".write": "auth != null && newData.child('authorId').val() === auth.uid",
-          ".validate": "newData.exists() && newData.hasChildren(['authorId','content','createdAt'])"
+          ".validate": "newData.exists() && newData.hasChildren(['authorId','content','createdAt'])",
+          "reactions": {
+            "$emoji": {
+              "$uid": {
+                ".write": "auth != null && auth.uid === $uid",
+                ".validate": "newData.val() === true || !newData.exists()"
+              }
+            }
+          }
         }
       }
     },
@@ -46,7 +62,15 @@
         "$messageId": {
           ".read": "auth != null",
           ".write": "auth != null && newData.child('authorId').val() === auth.uid",
-          ".validate": "newData.exists() && newData.hasChildren(['authorId','content','createdAt'])"
+          ".validate": "newData.exists() && newData.hasChildren(['authorId','content','createdAt'])",
+          "reactions": {
+            "$emoji": {
+              "$uid": {
+                ".write": "auth != null && auth.uid === $uid",
+                ".validate": "newData.val() === true || !newData.exists()"
+              }
+            }
+          }
         }
       }
     },
