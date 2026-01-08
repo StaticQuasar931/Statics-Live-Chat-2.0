@@ -154,6 +154,8 @@ const SHORTCODE_LOOKUP = Object.entries(SHORTCODES).reduce((acc, [code, emoji]) 
 
 // Custom Static emoji (image)
 const STATIC_EMOJI_URL = BRAND_ICON;
+const MESSAGE_DING_URL = "https://actions.google.com/sounds/v1/alarms/beep_short.ogg";
+const IDLE_TIMEOUT = 60000;
 
 /* ---------------------------
    INIT
@@ -321,6 +323,7 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
   .sectionTitle{ padding:10px 12px 6px 12px; font-size:12px; font-weight:800; letter-spacing:.4px; color:var(--muted); text-transform:uppercase; }
   .requestList{ padding:0 12px 10px 12px; display:flex; flex-direction:column; gap:8px; overflow:auto; max-height: 200px; }
   .chatList{ padding:0 12px 12px 12px; display:flex; flex-direction:column; gap:8px; overflow:auto; }
+  .userList{ padding:0 12px 10px 12px; display:flex; flex-direction:column; gap:8px; overflow:auto; max-height: 170px; }
 
   .chatItem{
     display:flex; gap:10px; align-items:center;
@@ -334,14 +337,40 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
   }
   .chatItem:hover{ background: rgba(255,255,255,.06); transform: translateY(-1px); }
   .chatItem.active{ outline: 2px solid rgba(106,167,255,.35); background: rgba(106,167,255,.10); }
-  .avatar{ width:38px; height:38px; border-radius:14px; overflow:hidden; border:1px solid var(--border); flex: 0 0 auto; background: rgba(255,255,255,.06); }
+  .avatar{ width:38px; height:38px; border-radius:14px; overflow:hidden; border:1px solid var(--border); flex: 0 0 auto; background: rgba(255,255,255,.06); position:relative; }
   .avatar img{ width:100%; height:100%; object-fit:cover; }
+  .statusDot{
+    position:absolute;
+    right:-2px;
+    bottom:-2px;
+    width:12px;
+    height:12px;
+    border-radius:999px;
+    border:2px solid var(--panel);
+  }
+  .status-online{ background:#2fd18d; }
+  .status-idle{ background:#f6c453; }
+  .status-offline{ background:#6c7387; }
   .chatMain{ flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; }
   .chatName{ font-weight:900; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .chatPreview{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .chatStatus{ font-size:11px; color:var(--muted); }
   .badgeRow{ display:flex; flex-direction:column; align-items:flex-end; gap:6px; }
   .badge{ background: rgba(255,77,77,.15); border:1px solid rgba(255,77,77,.35); color:#ffd7d7; padding:2px 8px; border-radius:999px; font-size:12px; font-weight:900; }
   .timeMini{ font-size:11px; color:var(--muted); }
+  .userRow{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:10px;
+    padding:8px 10px;
+    border:1px solid var(--border);
+    border-radius:12px;
+    background: rgba(0,0,0,.08);
+  }
+  .userInfo{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .userName{ font-weight:900; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .userUid{ font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 
   .topBar{
     display:flex; justify-content:space-between; align-items:center;
@@ -705,87 +734,6 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     .sidebar{ max-height: 340px; }
   }
 
-  /* Themes */
-  body.theme-dark{
-    --bg:#0c0f14;
-    --panel:#121825;
-    --panel2:#0f1520;
-    --text:#e9eef9;
-    --muted:#a8b1c7;
-    --border: rgba(255,255,255,.10);
-    --shadow: 0 12px 34px rgba(0,0,0,.35);
-    --accent:#6aa7ff;
-  }
-  body.theme-light{
-    --bg:#f4f7ff;
-    --panel:#ffffff;
-    --panel2:#f7f9ff;
-    --text:#111526;
-    --muted:#4c556e;
-    --border: rgba(17,21,38,.14);
-    --shadow: 0 12px 34px rgba(10,12,22,.12);
-    --accent:#2962ff;
-  }
-  body.theme-ocean{
-    --bg:#06121a;
-    --panel:#0b1f2b;
-    --panel2:#0a1822;
-    --text:#e6f8ff;
-    --muted:#93b7c6;
-    --border: rgba(230,248,255,.12);
-    --shadow: 0 12px 34px rgba(0,0,0,.35);
-    --accent:#3ad1ff;
-  }
-  body.theme-forest{
-    --bg:#07120c;
-    --panel:#0b1f14;
-    --panel2:#0a1810;
-    --text:#eafff2;
-    --muted:#9ac6ae;
-    --border: rgba(234,255,242,.12);
-    --shadow: 0 12px 34px rgba(0,0,0,.35);
-    --accent:#32d17b;
-  }
-  body.theme-sunset{
-    --bg:#160c0f;
-    --panel:#231218;
-    --panel2:#1b0f14;
-    --text:#ffe8f0;
-    --muted:#d9a8b8;
-    --border: rgba(255,232,240,.14);
-    --shadow: 0 12px 34px rgba(0,0,0,.35);
-    --accent:#ff7a59;
-  }
-  body.theme-lavender{
-    --bg:#151225;
-    --panel:#1d1a33;
-    --panel2:#18162c;
-    --text:#f1ecff;
-    --muted:#b7addd;
-    --border: rgba(241,236,255,.14);
-    --shadow: 0 12px 34px rgba(0,0,0,.35);
-    --accent:#9f7bff;
-  }
-  body.theme-midnight{
-    --bg:#06070f;
-    --panel:#0d1222;
-    --panel2:#0b111f;
-    --text:#e7f0ff;
-    --muted:#93a3c3;
-    --border: rgba(231,240,255,.12);
-    --shadow: 0 12px 34px rgba(0,0,0,.42);
-    --accent:#3b82f6;
-  }
-  body.theme-rose{
-    --bg:#160b12;
-    --panel:#20101b;
-    --panel2:#190e16;
-    --text:#ffe9f4;
-    --muted:#d6a3bd;
-    --border: rgba(255,233,244,.14);
-    --shadow: 0 12px 34px rgba(0,0,0,.35);
-    --accent:#ff5ca8;
-  }
   `;
   const style = document.createElement("style");
   style.textContent = css;
@@ -823,6 +771,7 @@ const S = {
   friendRequestsIn: {},
   friends: {},
   chats: [],
+  publicUsers: {},
 
   active: null,
   msgChildAddedUnsub: null,
@@ -830,6 +779,7 @@ const S = {
   presenceUnsubs: [],
   userDataUnsub: null,
   chatRefsUnsub: null,
+  publicUsersUnsub: null,
   reactionUnsubs: [],
 
   lastSendAt: 0,
@@ -837,6 +787,9 @@ const S = {
   chatState: {}, // { key: { lastReadAt, unread } }
   isTyping: false,
   typingTimer: null,
+  presenceStatus: "online",
+  idleTimer: null,
+  dingAudio: null,
 
   ui: {},
 
@@ -1130,9 +1083,9 @@ function injectVisualSeo() {
       padding: 0 12px 12px;
       width: 100%;
       display:flex;
-      flex-direction:row;
+      flex-direction:column;
       gap:8px;
-      align-items:center;
+      align-items:flex-start;
     }
     #staticMenu{
       display:flex; gap:10px; align-items:center; user-select:none;
@@ -1382,6 +1335,39 @@ window.onbeforeunload = function () {
   document.addEventListener("visibilitychange", () => setFocus(!document.hidden));
 })();
 
+async function setPresenceStatus(status, { updateLastSeen = false } = {}) {
+  if (!S.uid) return;
+  if (S.presenceStatus === status && !updateLastSeen) return;
+  S.presenceStatus = status;
+  const payload = { status };
+  if (updateLastSeen) payload.lastSeen = nowMs();
+  await update(ref(db, `users/${S.uid}`), payload).catch(() => {});
+  await update(ref(db, `publicUsers/${S.uid}`), payload).catch(() => {});
+  await update(ref(db, `presence/${S.uid}`), payload).catch(() => {});
+}
+
+function startPresenceTracking() {
+  if (!S.uid) return;
+  if (S.idleTimer) clearTimeout(S.idleTimer);
+
+  const markIdle = () => { setPresenceStatus("idle", { updateLastSeen: true }).catch(() => {}); };
+  const bump = () => {
+    setPresenceStatus("online").catch(() => {});
+    if (S.idleTimer) clearTimeout(S.idleTimer);
+    S.idleTimer = setTimeout(markIdle, IDLE_TIMEOUT);
+  };
+
+  const activityEvents = ["mousemove", "mousedown", "keydown", "touchstart"];
+  activityEvents.forEach((evt) => window.addEventListener(evt, bump));
+  window.addEventListener("focus", bump);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) markIdle();
+    else bump();
+  });
+
+  bump();
+}
+
 /* ---------------------------
    AUTH UI
 ---------------------------- */
@@ -1470,6 +1456,11 @@ async function ensureUserProfile(user) {
     displayNameDisplay: null,
     displayNameNormalized: null,
     theme: DEFAULT_THEME,
+    settings: {
+      useGoogleAvatar: true,
+      notifications: true,
+      messageSounds: true
+    },
     createdAt: nowMs(),
     lastLogin: nowMs(),
     lastSeen: nowMs(),
@@ -1486,7 +1477,12 @@ async function ensureUserProfile(user) {
       photoURL: user.photoURL || null,
       lastLogin: nowMs(),
       lastSeen: nowMs(),
-      status: "online"
+      status: "online",
+      settings: {
+        useGoogleAvatar: snap.val()?.settings?.useGoogleAvatar !== false,
+        notifications: snap.val()?.settings?.notifications !== false,
+        messageSounds: snap.val()?.settings?.messageSounds !== false
+      }
     });
   }
 
@@ -1541,6 +1537,9 @@ async function applyDisplayName(nextName, previousName, reason) {
   const normalized = normalizeDisplayName(raw);
   const previousNormalized = normalizeDisplayName(previousName || "");
   const prev = String(previousName || "").trim();
+  if (!raw || (prev && raw === prev && normalized === previousNormalized)) {
+    return false;
+  }
   const history = S.profile?.nameHistory || { current: null, previous: [] };
   const prevList = Array.isArray(history.previous) ? history.previous.slice(0) : [];
   if (prev && prev !== raw) prevList.unshift({ name: prev, at: nowMs() });
@@ -1568,14 +1567,16 @@ async function applyDisplayName(nextName, previousName, reason) {
     displayNameNormalized: normalized,
     photoURL: S.user?.photoURL || null,
     lastSeen: nowMs(),
-    status: "online",
+    status: S.presenceStatus || "online",
     nameHistory
   });
+  S._nameCache[S.uid] = raw;
 
   if (previousNormalized && previousNormalized !== normalized) {
     await remove(ref(db, `displayNames/${previousNormalized}`)).catch(() => {});
   }
   await set(ref(db, `displayNames/${normalized}`), S.uid);
+  return true;
 }
 
 function openDisplayNameModal(user) {
@@ -1616,6 +1617,7 @@ function openDisplayNameModal(user) {
   });
 
   const saveBtn = el("button", { class: "btn btnPrimary" }, ["Save"]);
+  const randomBtn = el("button", { class: "btn" }, ["Random"]);
   const cancelBtn = el("button", { class: "btn" }, ["Cancel"]);
 
   async function doSave() {
@@ -1623,6 +1625,16 @@ function openDisplayNameModal(user) {
     const raw = input.value || "";
     const v = validateDisplayName(raw);
     reportBtn.classList.add("hidden");
+    if (!String(raw || "").trim()) {
+      saveBtn.disabled = true;
+      saveBtn.textContent = "Picking...";
+      const auto = await generateUniqueDisplayName();
+      await applyDisplayName(auto, raw, "auto-generated");
+      showToast("Name was empty. A safe default was picked.", "ok");
+      m.close();
+      await refreshAll();
+      return;
+    }
     if (v) {
       const blocked = findBlockedWord(raw);
       if (blocked) {
@@ -1631,14 +1643,17 @@ function openDisplayNameModal(user) {
         reportBtn.onclick = () => reportNameIssue(raw, blocked);
         return;
       }
-      const auto = await generateUniqueDisplayName();
-      await applyDisplayName(auto, raw, "auto-generated");
-      showToast("Name updated with a safe default.", "ok");
-      m.close();
+      err.textContent = v;
       return;
     }
 
     const normalized = normalizeDisplayName(raw);
+    const current = S.profile?.displayNameDisplay || "";
+    if (current && raw === current) {
+      showToast("Display name unchanged.", "info");
+      m.close();
+      return;
+    }
 
     saveBtn.disabled = true;
     saveBtn.textContent = "Checking...";
@@ -1646,19 +1661,24 @@ function openDisplayNameModal(user) {
     try {
       const taken = await isDisplayNameTaken(normalized, user.uid);
       if (taken) {
-        const auto = await generateUniqueDisplayName();
-        await applyDisplayName(auto, raw, "auto-generated");
-        showToast("That name was taken. A new one was picked.", "ok");
-        m.close();
+        err.textContent = "That name is taken. Please choose another.";
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save";
         return;
       }
 
       saveBtn.textContent = "Saving...";
-      await applyDisplayName(raw, S.profile?.displayNameDisplay || "", "user-update");
+      const changed = await applyDisplayName(raw, S.profile?.displayNameDisplay || "", "user-update");
 
-      m.close();
-      showToast("Display name saved.", "ok");
-      await refreshAll();
+      if (changed) {
+        m.close();
+        showToast("Display name saved.", "ok");
+        await refreshAll();
+      } else {
+        saveBtn.disabled = false;
+        saveBtn.textContent = "Save";
+        showToast("Display name unchanged.", "info");
+      }
     } catch (e) {
       saveBtn.disabled = false;
       saveBtn.textContent = "Save";
@@ -1671,6 +1691,21 @@ function openDisplayNameModal(user) {
     if (ev.key === "Enter") doSave();
   });
 
+  randomBtn.addEventListener("click", async () => {
+    randomBtn.disabled = true;
+    randomBtn.textContent = "Picking...";
+    try {
+      const auto = await generateUniqueDisplayName();
+      input.value = auto;
+      err.textContent = "Random name ready. Click Save to use it.";
+    } catch {
+      err.textContent = "Failed to generate a random name.";
+    } finally {
+      randomBtn.disabled = false;
+      randomBtn.textContent = "Random";
+    }
+  });
+
   saveBtn.addEventListener("click", doSave);
   cancelBtn.addEventListener("click", () => m.close());
 
@@ -1679,7 +1714,7 @@ function openDisplayNameModal(user) {
   m.body.appendChild(input);
   m.body.appendChild(err);
   m.body.appendChild(reportWrap);
-  m.footer.appendChild(el("div", { class: "row" }, [cancelBtn, saveBtn]));
+  m.footer.appendChild(el("div", { class: "row" }, [cancelBtn, randomBtn, saveBtn]));
 }
 
 async function reportNameIssue(attemptedName, flaggedWord) {
@@ -1850,6 +1885,12 @@ function renderShell() {
   const reqTitle = el("div", { class: "sectionTitle", text: "Friend Requests" });
   const requestList = el("div", { class: "requestList", id: "requestList" });
 
+  const onlineTitle = el("div", { class: "sectionTitle", text: "Online Now" });
+  const onlineList = el("div", { class: "userList", id: "onlineList" });
+
+  const allUsersTitle = el("div", { class: "sectionTitle", text: "All Users" });
+  const allUsersList = el("div", { class: "userList", id: "allUsersList" });
+
   const chatTitle = el("div", { class: "sectionTitle", text: "Recent Chats" });
   const chatList = el("div", { class: "chatList", id: "chatList" });
 
@@ -1857,6 +1898,10 @@ function renderShell() {
   sidebar.appendChild(searchRow);
   sidebar.appendChild(reqTitle);
   sidebar.appendChild(requestList);
+  sidebar.appendChild(onlineTitle);
+  sidebar.appendChild(onlineList);
+  sidebar.appendChild(allUsersTitle);
+  sidebar.appendChild(allUsersList);
   sidebar.appendChild(chatTitle);
   sidebar.appendChild(chatList);
 
@@ -1919,6 +1964,8 @@ function renderShell() {
   S.ui = {
     shell,
     requestList,
+    onlineList,
+    allUsersList,
     chatList,
     searchChats: searchRow.querySelector("#searchChats"),
     chatTitle: topBar.querySelector("#chatTitle"),
@@ -2164,17 +2211,28 @@ async function acceptFriendRequest(fromUid) {
 /* ---------------------------
    CHATS (per-user refs + unread)
 ---------------------------- */
-async function upsertMyChatRef(type, id, name, photoURL, lastAt, sub) {
+async function upsertMyChatRef(type, id, name, photoURL, lastAt, sub, options = {}) {
   const key = scopeKey(type, id);
+  const existing = (S.chats || []).find((c) => c.type === type && c.id === id) || null;
   const obj = {
     type,
     id,
-    name: name || "Chat",
-    photoURL: photoURL || null,
-    lastAt: lastAt || nowMs(),
-    sub: sub || "",
-    hidden: false
+    name: name || existing?.name || "Chat",
+    photoURL: photoURL || existing?.photoURL || null,
+    sub: typeof sub === "string" ? sub : (existing?.sub || ""),
+    hidden: existing?.hidden || false
   };
+
+  if (options.preserveLastAt && existing?.lastAt) {
+    obj.lastAt = existing.lastAt;
+  } else if (typeof lastAt === "number") {
+    obj.lastAt = lastAt;
+  } else if (!options.preserveLastAt) {
+    obj.lastAt = nowMs();
+  } else if (!existing?.lastAt) {
+    obj.lastAt = nowMs();
+  }
+
   await update(ref(db, `users/${S.uid}/chatRefs/${key}`), obj).catch(() => {});
 }
 
@@ -2395,6 +2453,16 @@ function renderMessageContent(text) {
   return safe;
 }
 
+function playMessageDing() {
+  if (S.profile?.settings?.messageSounds === false) return;
+  if (!S.dingAudio) {
+    S.dingAudio = new Audio(MESSAGE_DING_URL);
+    S.dingAudio.volume = 0.6;
+  }
+  S.dingAudio.currentTime = 0;
+  S.dingAudio.play().catch(() => {});
+}
+
 function getEmojiOnlyState(text) {
   const raw = String(text || "").trim();
   if (!raw) return { emojiOnly: false, emojiCount: 0 };
@@ -2585,7 +2653,7 @@ async function openChat(chat) {
     S.active.joinCode = g.code || "";
     S.active.ownerId = g.ownerId || g.createdBy || "";
 
-    await upsertMyChatRef("group", chat.id, S.active.name, null, nowMs(), "Group DM");
+    await upsertMyChatRef("group", chat.id, S.active.name, null, undefined, "Group DM", { preserveLastAt: true });
     await subscribeMessagesGroup(chat.id);
     subscribeTyping("group", chat.id);
   }
@@ -2621,7 +2689,7 @@ async function ensureDmChatRefExists(chat) {
   if (S.ui.chatTitle) S.ui.chatTitle.textContent = friendDisplay;
   if (S.ui.chatSub) S.ui.chatSub.textContent = "DM";
 
-  await upsertMyChatRef("dm", chat.id, friendDisplay, friendPhoto, nowMs(), "DM");
+  await upsertMyChatRef("dm", chat.id, friendDisplay, friendPhoto, undefined, "DM", { preserveLastAt: true });
 }
 
 async function subscribeMessagesDm(dmId) {
@@ -2649,6 +2717,9 @@ async function subscribeMessagesDm(dmId) {
       scopeId: dmId,
       msgKey
     });
+    if (v.authorId && v.authorId !== S.uid) {
+      playMessageDing();
+    }
 
     await update(ref(db, `users/${S.uid}/chatRefs/${sk}`), {
       lastAt: v.createdAt || nowMs(),
@@ -2690,6 +2761,9 @@ async function subscribeMessagesGroup(groupId) {
       scopeId: groupId,
       msgKey
     });
+    if (v.authorId && v.authorId !== S.uid) {
+      playMessageDing();
+    }
 
     await update(ref(db, `users/${S.uid}/chatRefs/${sk}`), {
       lastAt: v.createdAt || nowMs(),
@@ -3017,7 +3091,7 @@ function openNewChatModal() {
         ]);
         item.addEventListener("click", async () => {
           const dmId = deterministicDmId(S.uid, friend.uid);
-          await upsertMyChatRef("dm", dmId, friend.displayNameDisplay || "Friend", friend.photoURL || null, nowMs(), "DM");
+          await upsertMyChatRef("dm", dmId, friend.displayNameDisplay || "Friend", friend.photoURL || null, undefined, "DM", { preserveLastAt: true });
           m.close();
           await refreshChats();
           await openChat({ type: "dm", id: dmId, name: friend.displayNameDisplay || "Friend", photoURL: friend.photoURL || null });
@@ -3028,9 +3102,11 @@ function openNewChatModal() {
 
   const groupTitle = el("div", { class: "hint", text: "Create Group DM" });
   const groupName = el("input", { class: "input", placeholder: "Group name..." });
-  const createBtn = el("button", { class: "btn btnPrimary" }, ["Create Group"]);
+  const createBtn = el("button", { class: "btn btnPrimary" }, ["Create Group DM"]);
 
   const memberWrap = el("div", { style: "display:flex; flex-direction:column; gap:8px; max-height: 180px; overflow:auto;" });
+  const preInviteTitle = el("div", { class: "hint", text: "Pre-invite" });
+  const preInviteList = el("div", { class: "small", text: "No pre-invites selected." });
   const memberChecks = new Map();
   if (hasFriends) {
     friends.forEach((friend) => {
@@ -3040,6 +3116,7 @@ function openNewChatModal() {
       ]);
       const checkbox = row.querySelector("input");
       memberChecks.set(friend.uid, checkbox);
+      checkbox.addEventListener("change", () => updatePreInviteList());
       memberWrap.appendChild(row);
     });
   } else {
@@ -3072,7 +3149,7 @@ function openNewChatModal() {
   const joinTitle = el("div", { class: "hint", text: "Join Group by Code" });
   const joinRow = el("div", { style: "display:flex; gap:8px; align-items:center;" });
   const joinInput = el("input", { class: "input", placeholder: "6-digit code..." });
-  const joinBtn = el("button", { class: "btn" }, ["Join Group"]);
+  const joinBtn = el("button", { class: "btn" }, ["Join by Code"]);
   const joinErr = el("div", { class: "hint" });
 
   joinBtn.addEventListener("click", async () => {
@@ -3088,7 +3165,7 @@ function openNewChatModal() {
     } catch (e) {
       joinErr.textContent = e?.message || "Failed to join group.";
       joinBtn.disabled = false;
-      joinBtn.textContent = "Join Group";
+      joinBtn.textContent = "Join by Code";
     }
   });
 
@@ -3098,8 +3175,21 @@ function openNewChatModal() {
   m.body.appendChild(dmSection);
   m.body.appendChild(dmList);
   m.body.appendChild(el("div", { class: "hr" }));
+  function updatePreInviteList() {
+    const names = [];
+    for (const [uid, checkbox] of memberChecks.entries()) {
+      if (!checkbox.checked) continue;
+      const friend = friends.find((f) => f.uid === uid);
+      if (friend) names.push(friend.displayNameDisplay || "Friend");
+    }
+    preInviteList.textContent = names.length ? names.join(", ") : "No pre-invites selected.";
+  }
+  updatePreInviteList();
+
   m.body.appendChild(groupTitle);
   m.body.appendChild(el("div", { style: "display:flex; gap:8px; align-items:center;" }, [groupName, createBtn]));
+  m.body.appendChild(preInviteTitle);
+  m.body.appendChild(preInviteList);
   m.body.appendChild(memberWrap);
   m.body.appendChild(createErr);
   m.body.appendChild(el("div", { class: "hr" }));
@@ -3301,6 +3391,7 @@ function openSettingsModal() {
   m.body.appendChild(nameBtn);
   m.body.appendChild(avatarRow);
   m.body.appendChild(notifyRow);
+  m.body.appendChild(soundRow);
   m.body.appendChild(switchBtn);
   m.body.appendChild(signOutBtn);
   m.body.appendChild(el("div", { class: "hr" }));
@@ -3455,6 +3546,77 @@ function subscribeChatRefs() {
   S.chatRefsUnsub = () => off(refPath, "value", handler);
 }
 
+function subscribePublicUsers() {
+  if (S.publicUsersUnsub) { try { S.publicUsersUnsub(); } catch {} }
+  const refPath = ref(db, "publicUsers");
+  const handler = onValue(refPath, (snap) => {
+    S.publicUsers = snap.exists() ? (snap.val() || {}) : {};
+    renderUserLists();
+    renderChatList();
+  });
+  S.publicUsersUnsub = () => off(refPath, "value", handler);
+}
+
+function renderUserLists() {
+  const onlineList = S.ui.onlineList;
+  const allList = S.ui.allUsersList;
+  if (!onlineList || !allList) return;
+  clear(onlineList);
+  clear(allList);
+
+  const entries = Object.entries(S.publicUsers || {}).map(([uid, u]) => ({
+    uid,
+    displayName: u?.displayNameDisplay || "User",
+    status: u?.status || "offline"
+  }));
+
+  const byName = (a, b) => String(a.displayName).localeCompare(String(b.displayName));
+
+  const onlineEntries = entries
+    .filter((u) => u.status === "online" || u.status === "idle")
+    .sort((a, b) => {
+      if (a.status !== b.status) return a.status === "online" ? -1 : 1;
+      return byName(a, b);
+    });
+
+  const allEntries = entries.slice().sort(byName);
+
+  if (!onlineEntries.length) {
+    onlineList.appendChild(el("div", { class: "small", text: "No one online yet." }));
+  } else {
+    onlineEntries.forEach((u) => {
+      const statusLabel = u.status === "idle" ? "Idle" : "Online";
+      const row = el("div", { class: "userRow" }, [
+        el("div", { class: "userInfo" }, [
+          el("div", { class: "userName", text: u.displayName }),
+          el("div", { class: "userUid", text: u.uid })
+        ]),
+        el("span", { class: `statusDot status-${u.status}`, title: statusLabel })
+      ]);
+      onlineList.appendChild(row);
+    });
+  }
+
+  if (!allEntries.length) {
+    allList.appendChild(el("div", { class: "small", text: "No users yet." }));
+  } else {
+    allEntries.forEach((u) => {
+      const statusLabel =
+        u.status === "online" ? "Online" :
+        u.status === "idle" ? "Idle" :
+        "Offline";
+      const row = el("div", { class: "userRow" }, [
+        el("div", { class: "userInfo" }, [
+          el("div", { class: "userName", text: u.displayName }),
+          el("div", { class: "userUid", text: u.uid })
+        ]),
+        el("span", { class: `statusDot status-${u.status}`, title: statusLabel })
+      ]);
+      allList.appendChild(row);
+    });
+  }
+}
+
 function renderChatList() {
   const list = S.ui.chatList;
   if (!list) return;
@@ -3480,13 +3642,20 @@ function renderChatList() {
       openChatContextMenu(ev.clientX, ev.clientY, c);
     });
 
+    const otherUid = c.type === "dm" ? getOtherUidFromChat(c) : null;
+    const status = otherUid ? (S.publicUsers?.[otherUid]?.status || "offline") : null;
+
     const av = el("div", { class: "avatar" }, [
       el("img", { src: c.photoURL || avatarUrlFor({ displayNameDisplay: c.name }), alt: "" })
     ]);
+    if (status) {
+      av.appendChild(el("span", { class: `statusDot status-${status}` }));
+    }
 
     const main = el("div", { class: "chatMain" }, [
       el("div", { class: "chatName", text: c.name }),
-      el("div", { class: "chatPreview", text: c.sub || (c.type === "group" ? "Group DM" : "DM") })
+      el("div", { class: "chatPreview", text: c.sub || (c.type === "group" ? "Group DM" : "DM") }),
+      status ? el("div", { class: "chatStatus", text: status === "idle" ? "Idle" : (status === "online" ? "Online" : "Offline") }) : null
     ]);
 
     const right = el("div", { class: "badgeRow" }, [
@@ -3618,15 +3787,16 @@ onAuthStateChanged(auth, async (user) => {
 
     subscribeUserData();
     subscribeChatRefs();
+    subscribePublicUsers();
     await refreshAll();
 
     // Keep lastSeen updated sometimes
     setInterval(() => {
       if (!S.uid) return;
-      update(ref(db, `users/${S.uid}`), { lastSeen: nowMs(), status: "online" }).catch(() => {});
-      update(ref(db, `publicUsers/${S.uid}`), { lastSeen: nowMs(), status: "online" }).catch(() => {});
-      update(ref(db, `presence/${S.uid}`), { lastSeen: nowMs(), status: "online" }).catch(() => {});
+      setPresenceStatus(S.presenceStatus || "online", { updateLastSeen: true }).catch(() => {});
     }, 25000);
+
+    startPresenceTracking();
 
     // when window returns focus, mark active as read
     window.addEventListener("focus", () => { markActiveReadNow().catch(() => {}); });
@@ -3656,4 +3826,14 @@ onAuthStateChanged(auth, async (user) => {
   notifyToggle.checked = S.profile?.settings?.notifications !== false;
   notifyToggle.addEventListener("change", async () => {
     await update(ref(db, `users/${S.uid}/settings`), { notifications: notifyToggle.checked }).catch((e) => logFirebaseError("update-notifications", e));
+  });
+
+  const soundRow = el("label", { style: "display:flex; align-items:center; gap:8px;" }, [
+    el("input", { type: "checkbox" }),
+    el("span", { text: "Play message sounds" })
+  ]);
+  const soundToggle = soundRow.querySelector("input");
+  soundToggle.checked = S.profile?.settings?.messageSounds !== false;
+  soundToggle.addEventListener("change", async () => {
+    await update(ref(db, `users/${S.uid}/settings`), { messageSounds: soundToggle.checked }).catch((e) => logFirebaseError("update-message-sounds", e));
   });
