@@ -1,5 +1,6 @@
 const NAME_BLOCKLIST = [
   "admin", "moderator", "owner", "staff", "support", "system",
+  "goon", "gooning", "gooner", "gyat", "gyatt", "rizz", "rizzler",
   "1488", "8=d", "a55hole", "abortion", "ahole", "aids",
   "ainujin", "ainuzin", "akimekura", "anal", "anus", "anuses",
   "anushead", "anuslick", "anuss", "aokan", "arsch", "arschloch",

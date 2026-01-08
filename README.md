@@ -25,6 +25,7 @@ This repository contains the ChatGPT Codex iteration of the project.
 ## 📁 Project Structure
 - `index.html` – App shell
 - `app.js` – UI, state, and realtime chat logic
+- `commands.js` – Command responses and mini bot features
 - Firebase Realtime Database rules are managed outside of the repo
 - `name-blocklist.js` – Reserved/blocked display-name list
 

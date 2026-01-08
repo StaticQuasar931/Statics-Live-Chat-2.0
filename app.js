@@ -30,6 +30,7 @@ import {
   equalTo
 } from "https://www.gstatic.com/firebasejs/11.5.0/firebase-database.js";
 import NAME_BLOCKLIST from "./name-blocklist.js";
+import { createCommandHandler } from "./commands.js";
 
 /* ---------------------------
    CONFIG
@@ -52,7 +53,7 @@ const BRAND_LINK = "https://sites.google.com/view/staticquasar931/gm3z";
 const RESERVED_NAMES = ["staticquasar931", "static"];
 const RESERVED_PARTS = ["static", "quasar", "quasar931"];
 
-const THEMES = ["dark", "light", "ocean", "forest", "sunset", "lavender", "midnight", "rose"];
+const THEMES = ["dark", "light", "ocean", "forest", "sunset", "lavender", "midnight", "rose", "neon", "sand", "icy"];
 const DEFAULT_THEME = "dark";
 
 const SEND_COOLDOWN_MS = 500;
@@ -348,6 +349,10 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     border-radius:999px;
     border:2px solid var(--panel);
   }
+  .userRow .statusDot{
+    position: static;
+    margin-left: 8px;
+  }
   .status-online{ background:#2fd18d; }
   .status-idle{ background:#f6c453; }
   .status-offline{ background:#6c7387; }
@@ -367,10 +372,13 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     border:1px solid var(--border);
     border-radius:12px;
     background: rgba(0,0,0,.08);
+    cursor:pointer;
+    text-align:left;
   }
   .userInfo{ display:flex; flex-direction:column; gap:2px; min-width:0; }
   .userName{ font-weight:900; font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .userUid{ font-size:11px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .userStatus{ font-size:11px; color:var(--muted); }
 
   .topBar{
     display:flex; justify-content:space-between; align-items:center;
@@ -382,6 +390,7 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
   .topRight{ display:flex; align-items:center; gap:8px; flex:0 0 auto; }
   .chatTitle{ font-weight:950; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .chatSub{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .copyable{ cursor:pointer; }
 
   .pill{
     display:flex; gap:8px; align-items:center;
@@ -391,6 +400,7 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     background: linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,.04));
     font-size:12px;
     color:var(--muted);
+    cursor:pointer;
   }
   .pill b{ color:var(--text); }
 
@@ -414,6 +424,11 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     padding:10px 12px;
     background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(0,0,0,.08));
     box-shadow: 0 10px 18px rgba(0,0,0,.2);
+    transition: transform .12s ease, box-shadow .12s ease;
+  }
+  .msgBubble:hover{
+    transform: translateY(-1px);
+    box-shadow: 0 12px 22px rgba(0,0,0,.26);
   }
   .msgRow.me .msgBubble{
     background: rgba(106,167,255,.12);
@@ -634,13 +649,14 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
 
   .toastWrap{
     position: fixed;
-    bottom: 14px;
-    left: 14px;
+    top: 14px;
+    right: 14px;
     display:flex;
     flex-direction:column;
     gap:10px;
     z-index: 99999;
     pointer-events:none;
+    align-items:flex-end;
   }
   .toast{
     pointer-events:none;
@@ -790,6 +806,7 @@ const S = {
   presenceStatus: "online",
   idleTimer: null,
   dingAudio: null,
+  autoOpenInProgress: false,
 
   ui: {},
 
@@ -1128,7 +1145,7 @@ function injectVisualSeo() {
     .slide-in{ animation:slideIn 2s ease forwards }
     .slide-out{ animation:slideOut 2s ease forwards }
     @keyframes slideIn{ from{opacity:0; transform:translateX(-140px) scale(.96)} to{opacity:1; transform:translateX(0) scale(1)} }
-    @keyframes slideOut{ from{opacity:1; transform:translateX(0) scale(1)} to{opacity:0; transform:translateX(140px) scale(.96)} }
+    @keyframes slideOut{ from{opacity:1; transform:translateX(0) scale(1)} to{opacity:0; transform:translateX(-140px) scale(.96)} }
     @keyframes slideInAuth{ from{opacity:0; transform:translateY(140px) scale(.96)} to{opacity:1; transform:translateY(0) scale(1)} }
     @keyframes slideOutAuth{ from{opacity:1; transform:translateY(0) scale(1)} to{opacity:0; transform:translateY(140px) scale(.96)} }
     body.auth-screen #staticSlideMenu.slide-in{ animation:slideInAuth 2s ease forwards; }
@@ -1873,6 +1890,7 @@ function renderShell() {
       ])
     ]),
     el("div", { class: "sideTools" }, [
+      el("button", { class: "iconBtn", title: "Friends", onclick: openFriendsModal }, [svgUsers()]),
       el("button", { class: "iconBtn", title: "New Chat", onclick: openNewChatModal }, [svgPlus()]),
       el("button", { class: "iconBtn", title: "Add Friend", onclick: openAddFriendModal }, [svgUserPlus()])
     ])
@@ -1885,12 +1903,6 @@ function renderShell() {
   const reqTitle = el("div", { class: "sectionTitle", text: "Friend Requests" });
   const requestList = el("div", { class: "requestList", id: "requestList" });
 
-  const onlineTitle = el("div", { class: "sectionTitle", text: "Online Now" });
-  const onlineList = el("div", { class: "userList", id: "onlineList" });
-
-  const allUsersTitle = el("div", { class: "sectionTitle", text: "All Users" });
-  const allUsersList = el("div", { class: "userList", id: "allUsersList" });
-
   const chatTitle = el("div", { class: "sectionTitle", text: "Recent Chats" });
   const chatList = el("div", { class: "chatList", id: "chatList" });
 
@@ -1898,10 +1910,6 @@ function renderShell() {
   sidebar.appendChild(searchRow);
   sidebar.appendChild(reqTitle);
   sidebar.appendChild(requestList);
-  sidebar.appendChild(onlineTitle);
-  sidebar.appendChild(onlineList);
-  sidebar.appendChild(allUsersTitle);
-  sidebar.appendChild(allUsersList);
   sidebar.appendChild(chatTitle);
   sidebar.appendChild(chatList);
 
@@ -1964,8 +1972,6 @@ function renderShell() {
   S.ui = {
     shell,
     requestList,
-    onlineList,
-    allUsersList,
     chatList,
     searchChats: searchRow.querySelector("#searchChats"),
     chatTitle: topBar.querySelector("#chatTitle"),
@@ -1980,6 +1986,8 @@ function renderShell() {
     typingLine,
     countLine
   };
+
+  renderHomePanel();
 
   // behaviors
   S.ui.searchChats.addEventListener("input", () => renderChatList());
@@ -2234,6 +2242,13 @@ async function upsertMyChatRef(type, id, name, photoURL, lastAt, sub, options = 
   }
 
   await update(ref(db, `users/${S.uid}/chatRefs/${key}`), obj).catch(() => {});
+}
+
+async function clearActiveChat() {
+  S.active = null;
+  clearChatListeners();
+  renderHomePanel();
+  renderChatList();
 }
 
 async function hideChatRef(type, id) {
@@ -2665,8 +2680,10 @@ async function openChat(chat) {
       const extra = S.active.members.length > names.length ? ` +${S.active.members.length - names.length}` : "";
       const memberLine = names.length ? ` • Members: ${names.join(", ")}${extra}` : "";
       S.ui.chatSub.textContent = `Group DM • Join code: ${S.active.joinCode || "—"}${memberLine}`;
+      S.ui.chatSub.classList.add("copyable");
     } else {
       S.ui.chatSub.textContent = "DM";
+      S.ui.chatSub.classList.remove("copyable");
     }
   }
 
@@ -2814,6 +2831,23 @@ function onComposerInput() {
   }, 900);
 }
 
+function renderHomePanel() {
+  if (!S.ui?.messages) return;
+  if (S.active) return;
+  clear(S.ui.messages);
+  const wrap = el("div", { style: "display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; height:100%;" });
+  const title = el("div", { class: "chatTitle", text: "Welcome" });
+  const subtitle = el("div", { class: "hint", text: "Pick a chat, open your friends list, or tweak your settings." });
+  const actions = el("div", { class: "row", style: "justify-content:center;" }, [
+    el("button", { class: "btn", onclick: openFriendsModal }, ["Friends"]),
+    el("button", { class: "btn", onclick: openSettingsModal }, ["Settings"])
+  ]);
+  wrap.appendChild(title);
+  wrap.appendChild(subtitle);
+  wrap.appendChild(actions);
+  S.ui.messages.appendChild(wrap);
+}
+
 async function onSendClicked() {
   if (!S.user || !S.active) { showToast("Select a chat first.", "warn"); return; }
 
@@ -2874,22 +2908,6 @@ async function onSendClicked() {
 /* ---------------------------
    COMMANDS + REPORTS (simple)
 ---------------------------- */
-const TRUTH_PROMPTS = [
-  "What is your favorite game of all time?",
-  "What’s a secret talent you have?",
-  "What’s the last song you played on repeat?",
-  "If you could teleport anywhere, where would you go?",
-  "What’s your favorite movie or show right now?"
-];
-
-const DARE_PROMPTS = [
-  "Send a message using only emojis.",
-  "Type your next message in ALL CAPS.",
-  "Share a fun fact about yourself.",
-  "Say hello in three different languages.",
-  "Post your favorite emoji three times."
-];
-
 async function postSystemToActive(text) {
   if (!S.active) return;
   const msgObj = { authorId: S.uid, content: `🧩 ${text}`, createdAt: nowMs() };
@@ -2899,66 +2917,16 @@ async function postSystemToActive(text) {
   } catch {}
 }
 
-async function handleCommand(cmdRaw) {
-  const parts = String(cmdRaw).trim().split(/\s+/g);
-  const cmd = (parts[0] || "").toLowerCase();
-
-  if (cmd === "/help") {
-    await postSystemToActive("Commands: /help, /coinflip (/cf), /roll [sides], /tod, /hidechat, /unhidechat, /leave, /report <reason>");
-    return;
-  }
-  if (cmd === "/coinflip" || cmd === "/cf") {
-    await postSystemToActive(`🪙 Coin flip: ${Math.random() < 0.5 ? "Heads" : "Tails"}`);
-    return;
-  }
-  if (cmd === "/roll") {
-    const sides = clamp(parseInt(parts[1] || "6", 10) || 6, 2, 1000);
-    await postSystemToActive(`🎲 Rolled d${sides}: ${Math.floor(Math.random() * sides) + 1}`);
-    return;
-  }
-  if (cmd === "/tod") {
-    const pickTruth = Math.random() < 0.5;
-    const prompt = pickTruth
-      ? TRUTH_PROMPTS[Math.floor(Math.random() * TRUTH_PROMPTS.length)]
-      : DARE_PROMPTS[Math.floor(Math.random() * DARE_PROMPTS.length)];
-    await postSystemToActive(`${pickTruth ? "Truth" : "Dare"}: ${prompt}`);
-    return;
-  }
-  if (cmd === "/hidechat") {
-    if (!S.active) return;
-    await hideChatRef(S.active.type, S.active.id);
-    showToast("Chat hidden.", "ok");
-    S.active = null;
-    clearChatListeners();
-    renderSystemMessage("Chat hidden. Unhide from Settings.", true);
-    await refreshChats();
-    return;
-  }
-  if (cmd === "/unhidechat") {
-    if (!S.active) return;
-    await unhideChatRef(S.active.type, S.active.id);
-    showToast("Chat unhidden.", "ok");
-    await refreshChats();
-    return;
-  }
-  if (cmd === "/leave") {
-    if (!S.active) return;
-    if (S.active.type !== "group") {
-      showToast("/leave only works in group DMs.", "warn");
-      return;
-    }
-    await leaveGroup(S.active.id);
-    return;
-  }
-  if (cmd === "/report") {
-    const reason = parts.slice(1).join(" ").trim();
-    if (!reason) { await postSystemToActive("Usage: /report <reason>"); return; }
-    await openReportModal(reason);
-    return;
-  }
-
-  await postSystemToActive(`Unknown command: ${cmd}. Use /help.`);
-}
+const handleCommand = createCommandHandler({
+  postSystem: postSystemToActive,
+  getActive: () => S.active,
+  hideChatRef,
+  unhideChatRef,
+  leaveGroup,
+  openReportModal,
+  showToast,
+  clearActiveChat
+});
 
 async function openReportModal(prefillReason = "") {
   if (!S.active) return;
@@ -3433,8 +3401,41 @@ function openSettingsModal() {
   m.footer.appendChild(el("div", { class: "row" }, [closeBtn]));
 }
 
+function openFriendsModal() {
+  const m = modalBase("Friends");
+  const hint = el("div", { class: "hint" }, ["View your friends and jump into a DM."]);
+
+  const onlineTitle = el("div", { class: "sectionTitle", text: "Online Friends" });
+  const onlineList = el("div", { class: "userList" });
+
+  const allTitle = el("div", { class: "sectionTitle", text: "All Friends" });
+  const allList = el("div", { class: "userList" });
+
+  const closeBtn = el("button", { class: "btn" }, ["Close"]);
+  closeBtn.addEventListener("click", () => m.close());
+
+  m.body.appendChild(hint);
+  m.body.appendChild(onlineTitle);
+  m.body.appendChild(onlineList);
+  m.body.appendChild(allTitle);
+  m.body.appendChild(allList);
+  m.footer.appendChild(el("div", { class: "row" }, [closeBtn]));
+
+  S.ui.friendsModal = m;
+  S.ui.friendsModalLists = { onlineList, allList };
+  renderFriendsModalLists();
+
+  const prevClose = m.close;
+  m.close = () => {
+    S.ui.friendsModalLists = null;
+    S.ui.friendsModal = null;
+    prevClose();
+  };
+}
+
 function svgPalette() { return el("span", { html: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 3a9 9 0 0 0 0 18h1a3 3 0 0 0 0-6h-1a3 3 0 0 1 0-6h1a3 3 0 0 0 0-6h-1Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M7.5 10.5h.01M9 7.8h.01M15 7.8h.01M16.5 10.5h.01" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>` }); }
 function svgGear() { return el("span", { html: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" stroke="currentColor" stroke-width="2"/><path d="M19.4 15a8.2 8.2 0 0 0 .1-1l2-1.2-2-3.5-2.3.6a7.7 7.7 0 0 0-1.7-1l-.3-2.4h-4l-.3 2.4a7.7 7.7 0 0 0-1.7 1l-2.3-.6-2 3.5 2 1.2a8.2 8.2 0 0 0 0 2l-2 1.2 2 3.5 2.3-.6a7.7 7.7 0 0 0 1.7 1l.3 2.4h4l.3-2.4a7.7 7.7 0 0 0 1.7-1l2.3.6 2-3.5-2-1.2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>` }); }
+function svgUsers() { return el("span", { html: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M16 19a4 4 0 0 0-8 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/><path d="M22 19a4 4 0 0 0-6-3.46" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M18 11a3 3 0 1 0 0-6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>` }); }
 function svgPlus() { return el("span", { html: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>` }); }
 function svgUserPlus() { return el("span", { html: `<svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M15 19a4 4 0 0 0-8 0" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><path d="M11 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Z" stroke="currentColor" stroke-width="2"/>
 <path d="M19 8v6M16 11h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>` }); }
@@ -3458,6 +3459,7 @@ async function refreshFriendsAndRequests() {
 
   syncFriendProfiles().catch(() => {});
   renderFriendRequests();
+  renderFriendsModalLists();
 }
 
 async function syncFriendProfiles() {
@@ -3509,6 +3511,16 @@ async function refreshChats() {
   const snap = await get(ref(db, `users/${S.uid}/chatRefs`));
   const refsObj = snap.exists() ? (snap.val() || {}) : {};
   hydrateChatRefs(refsObj);
+  if (!S.active && S.chats.length === 0) {
+    renderHomePanel();
+  } else if (!S.active && S.chats.length > 0 && !S.autoOpenInProgress) {
+    const next = [...S.chats].sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0))[0];
+    if (next) {
+      S.autoOpenInProgress = true;
+      await openChat(next).catch(() => {});
+      S.autoOpenInProgress = false;
+    }
+  }
 }
 
 async function refreshAll() {
@@ -3551,24 +3563,28 @@ function subscribePublicUsers() {
   const refPath = ref(db, "publicUsers");
   const handler = onValue(refPath, (snap) => {
     S.publicUsers = snap.exists() ? (snap.val() || {}) : {};
-    renderUserLists();
+    renderFriendsModalLists();
     renderChatList();
   });
   S.publicUsersUnsub = () => off(refPath, "value", handler);
 }
 
-function renderUserLists() {
-  const onlineList = S.ui.onlineList;
-  const allList = S.ui.allUsersList;
-  if (!onlineList || !allList) return;
+function renderFriendsModalLists() {
+  if (!S.ui.friendsModalLists) return;
+  const { onlineList, allList } = S.ui.friendsModalLists;
   clear(onlineList);
   clear(allList);
 
-  const entries = Object.entries(S.publicUsers || {}).map(([uid, u]) => ({
-    uid,
-    displayName: u?.displayNameDisplay || "User",
-    status: u?.status || "offline"
-  }));
+  const entries = Object.values(S.friends || {}).map((friend) => {
+    const uid = friend.uid;
+    const pub = S.publicUsers?.[uid];
+    return {
+      uid,
+      displayName: pub?.displayNameDisplay || friend.displayNameDisplay || "Friend",
+      status: pub?.status || "offline",
+      photoURL: pub?.photoURL || friend.photoURL || null
+    };
+  });
 
   const byName = (a, b) => String(a.displayName).localeCompare(String(b.displayName));
 
@@ -3581,39 +3597,39 @@ function renderUserLists() {
 
   const allEntries = entries.slice().sort(byName);
 
-  if (!onlineEntries.length) {
-    onlineList.appendChild(el("div", { class: "small", text: "No one online yet." }));
-  } else {
-    onlineEntries.forEach((u) => {
-      const statusLabel = u.status === "idle" ? "Idle" : "Online";
-      const row = el("div", { class: "userRow" }, [
-        el("div", { class: "userInfo" }, [
-          el("div", { class: "userName", text: u.displayName }),
-          el("div", { class: "userUid", text: u.uid })
-        ]),
-        el("span", { class: `statusDot status-${u.status}`, title: statusLabel })
-      ]);
-      onlineList.appendChild(row);
+  const buildRow = (u) => {
+    const statusLabel =
+      u.status === "online" ? "Online" :
+      u.status === "idle" ? "Idle 🌙" :
+      "Offline";
+    const row = el("button", { class: "userRow", type: "button" }, [
+      el("div", { class: "userInfo" }, [
+        el("div", { class: "userName", text: u.displayName }),
+        el("div", { class: "userUid", text: u.uid }),
+        el("div", { class: "userStatus", text: statusLabel })
+      ]),
+      el("span", { class: `statusDot status-${u.status}`, title: statusLabel })
+    ]);
+    row.addEventListener("click", async () => {
+      const dmId = deterministicDmId(S.uid, u.uid);
+      await upsertMyChatRef("dm", dmId, u.displayName, u.photoURL, undefined, "DM", { preserveLastAt: true });
+      if (S.ui.friendsModal?.close) S.ui.friendsModal.close();
+      await refreshChats();
+      await openChat({ type: "dm", id: dmId, name: u.displayName, photoURL: u.photoURL });
     });
+    return row;
+  };
+
+  if (!onlineEntries.length) {
+    onlineList.appendChild(el("div", { class: "small", text: "No friends online yet." }));
+  } else {
+    onlineEntries.forEach((u) => onlineList.appendChild(buildRow(u)));
   }
 
   if (!allEntries.length) {
-    allList.appendChild(el("div", { class: "small", text: "No users yet." }));
+    allList.appendChild(el("div", { class: "small", text: "No friends yet." }));
   } else {
-    allEntries.forEach((u) => {
-      const statusLabel =
-        u.status === "online" ? "Online" :
-        u.status === "idle" ? "Idle" :
-        "Offline";
-      const row = el("div", { class: "userRow" }, [
-        el("div", { class: "userInfo" }, [
-          el("div", { class: "userName", text: u.displayName }),
-          el("div", { class: "userUid", text: u.uid })
-        ]),
-        el("span", { class: `statusDot status-${u.status}`, title: statusLabel })
-      ]);
-      allList.appendChild(row);
-    });
+    allEntries.forEach((u) => allList.appendChild(buildRow(u)));
   }
 }
 
@@ -3655,7 +3671,7 @@ function renderChatList() {
     const main = el("div", { class: "chatMain" }, [
       el("div", { class: "chatName", text: c.name }),
       el("div", { class: "chatPreview", text: c.sub || (c.type === "group" ? "Group DM" : "DM") }),
-      status ? el("div", { class: "chatStatus", text: status === "idle" ? "Idle" : (status === "online" ? "Online" : "Offline") }) : null
+      status ? el("div", { class: "chatStatus", text: status === "idle" ? "Idle 🌙" : (status === "online" ? "Online" : "Offline") }) : null
     ]);
 
     const right = el("div", { class: "badgeRow" }, [
