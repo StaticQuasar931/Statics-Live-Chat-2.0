@@ -49,6 +49,8 @@ const APP_NAME = "ChattyChatFace";
 const APP_SECONDARY_NAME = "Static's Live Chatting 2.0";
 const BRAND_NAME = "StaticQuasar931";
 const BRAND_LINK = "https://sites.google.com/view/staticquasar931/gm3z";
+const RESERVED_NAMES = ["staticquasar931", "static"];
+const RESERVED_PARTS = ["static", "quasar", "quasar931"];
 
 const THEMES = ["dark", "light", "ocean", "forest", "sunset", "lavender", "midnight", "rose"];
 const DEFAULT_THEME = "dark";
@@ -763,6 +765,12 @@ function normalizeDisplayName(name) {
   return String(name || "").trim().toLowerCase();
 }
 
+function isReservedName(name) {
+  const n = normalizeDisplayName(name);
+  if (RESERVED_NAMES.includes(n)) return true;
+  return RESERVED_PARTS.some((part) => n.includes(part));
+}
+
 function normalizeRepeatedChars(value) {
   return value.replace(/(.)\1+/g, "$1");
 }
@@ -789,6 +797,9 @@ function validateDisplayName(name) {
   if (raw.length < DISPLAY_MIN) return `Display name must be at least ${DISPLAY_MIN} characters.`;
   if (raw.length > DISPLAY_MAX) return `Display name must be at most ${DISPLAY_MAX} characters.`;
   if (!DISPLAY_REGEX.test(raw)) return "Display name can only use letters, numbers, and . _ - (no spaces).";
+  if (!RESERVED_NAMES.includes(normalizeDisplayName(raw)) && isReservedName(raw)) {
+    return "That display name is reserved.";
+  }
   if (containsBlockedName(raw)) return "That display name is not allowed.";
   return null;
 }
@@ -1028,6 +1039,17 @@ function injectVisualSeo() {
       top:12px;
       bottom:auto;
     }
+    .staticMenuInApp{
+      position: sticky !important;
+      bottom: 8px;
+      left: auto;
+      top: auto;
+      width: calc(100% - 12px);
+      margin: 0 auto 8px auto;
+      border: 1px solid var(--border);
+      background: rgba(0,0,0,.12);
+      box-shadow: var(--shadow);
+    }
     #staticMenu a{ color:#5ee1ff; font-weight:800; text-decoration:none }
     #closeStaticMenu{
       color:#f55; cursor:pointer; padding:2px 6px; border-radius:6px;
@@ -1039,9 +1061,9 @@ function injectVisualSeo() {
     }
 
     #staticSlideMenu{
-      position:fixed; bottom:24px; right:24px; z-index:9999;
+      position:fixed; top:16px; left:16px; z-index:9999;
       width:100px; height:100px; pointer-events:none; opacity:0;
-      transform:translateX(140px) scale(.96);
+      transform:translateY(-140px) scale(.96);
     }
     #staticSlideMenu a{ display:block; width:100%; height:100% }
     #staticSlideMenu img{
@@ -1051,8 +1073,17 @@ function injectVisualSeo() {
     }
     .slide-in{ animation:slideIn 2s ease forwards }
     .slide-out{ animation:slideOut 2s ease forwards }
-    @keyframes slideIn{ from{opacity:0; transform:translateX(140px) scale(.96)} to{opacity:1; transform:translateX(0) scale(1)} }
-    @keyframes slideOut{ from{opacity:1; transform:translateX(0) scale(1)} to{opacity:0; transform:translateX(140px) scale(.96)} }
+    @keyframes slideIn{ from{opacity:0; transform:translateY(-140px) scale(.96)} to{opacity:1; transform:translateY(0) scale(1)} }
+    @keyframes slideOut{ from{opacity:1; transform:translateY(0) scale(1)} to{opacity:0; transform:translateY(-140px) scale(.96)} }
+
+    .staticSlideInApp{
+      position: sticky !important;
+      top: 8px;
+      left: auto;
+      margin: 0 auto;
+      width: 96px;
+      height: 96px;
+    }
 
     .seo-hidden{
       position:absolute; width:1px; height:1px; overflow:hidden;
@@ -1485,6 +1516,7 @@ function openDisplayNameModal(user) {
     err.textContent = "";
     const raw = input.value || "";
     const v = validateDisplayName(raw);
+    reportBtn.classList.add("hidden");
     if (v) {
       const blocked = findBlockedWord(raw);
       if (blocked) {
@@ -1597,6 +1629,10 @@ async function saveThemeToCloud(theme) {
 function renderSignedOut() {
   clear(root);
   document.body.classList.add("auth-screen");
+  const staticMenu = document.getElementById("staticMenu");
+  const staticSlideMenu = document.getElementById("staticSlideMenu");
+  if (staticMenu) staticMenu.classList.remove("staticMenuInApp");
+  if (staticSlideMenu) staticSlideMenu.classList.remove("staticSlideInApp");
 
   const screen = el("div", { class: "authScreen" });
   const card = el("div", { class: "authCard authCardGlow" });
@@ -1643,6 +1679,10 @@ function renderSignedOut() {
 function renderLoadingScreen() {
   clear(root);
   document.body.classList.add("auth-screen");
+  const staticMenu = document.getElementById("staticMenu");
+  const staticSlideMenu = document.getElementById("staticSlideMenu");
+  if (staticMenu) staticMenu.classList.remove("staticMenuInApp");
+  if (staticSlideMenu) staticSlideMenu.classList.remove("staticSlideInApp");
 
   const screen = el("div", { class: "authScreen" });
   const card = el("div", { class: "authCard authCardGlow" });
@@ -1707,6 +1747,17 @@ function renderShell() {
   sidebar.appendChild(requestList);
   sidebar.appendChild(chatTitle);
   sidebar.appendChild(chatList);
+
+  const staticMenu = document.getElementById("staticMenu");
+  const staticSlideMenu = document.getElementById("staticSlideMenu");
+  if (staticSlideMenu) {
+    staticSlideMenu.classList.add("staticSlideInApp");
+    sidebar.appendChild(staticSlideMenu);
+  }
+  if (staticMenu) {
+    staticMenu.classList.add("staticMenuInApp");
+    sidebar.appendChild(staticMenu);
+  }
 
   // CHAT PANE
   const chatPane = el("div", { class: "panel chatPane" });
@@ -3019,7 +3070,7 @@ function openSettingsModal() {
     "Use the buttons below to manage your account or chats."
   ]);
 
-  const nameBtn = el("button", { class: "btn" }, ["Change Display Name"]);
+  const nameBtn = el("button", { class: "btn" }, [`Change Display Name (${S.profile?.displayNameDisplay || "User"})`]);
   nameBtn.addEventListener("click", () => {
     m.close();
     openDisplayNameModal(S.user);
@@ -3079,6 +3130,8 @@ function openSettingsModal() {
   m.body.appendChild(el("div", { class: "hr" }));
   m.body.appendChild(nameBtn);
   m.body.appendChild(avatarRow);
+  m.body.appendChild(notifyRow);
+  m.body.appendChild(switchBtn);
   m.body.appendChild(signOutBtn);
   m.body.appendChild(el("div", { class: "hr" }));
 
@@ -3415,3 +3468,22 @@ onAuthStateChanged(auth, async (user) => {
     renderSignedOut();
   }
 });
+  const switchBtn = el("button", { class: "btn" }, ["Switch Account"]);
+  switchBtn.addEventListener("click", async () => {
+    try {
+      await signOut(auth);
+      openSignInModal();
+    } catch (e) {
+      logFirebaseError("switch-account", e);
+    }
+  });
+
+  const notifyRow = el("label", { style: "display:flex; align-items:center; gap:8px;" }, [
+    el("input", { type: "checkbox" }),
+    el("span", { text: "Enable in-app notifications" })
+  ]);
+  const notifyToggle = notifyRow.querySelector("input");
+  notifyToggle.checked = S.profile?.settings?.notifications !== false;
+  notifyToggle.addEventListener("change", async () => {
+    await update(ref(db, `users/${S.uid}/settings`), { notifications: notifyToggle.checked }).catch((e) => logFirebaseError("update-notifications", e));
+  });
