@@ -704,7 +704,19 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     background: rgba(0,0,0,.10);
   }
   .reqLeft{ display:flex; flex-direction:column; gap:2px; min-width:0; }
-  .reqName{ font-weight: 950; font-size: 13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .reqName{
+    font-weight: 950;
+    font-size: 13px;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis;
+    border:none;
+    background: transparent;
+    color: var(--text);
+    text-align:left;
+    cursor:pointer;
+    padding:0;
+  }
   .reqMeta{ color: var(--muted); font-size: 12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .reqBtns{ display:flex; gap:8px; flex: 0 0 auto; }
   .btnTiny{
@@ -2085,8 +2097,23 @@ function renderFriendRequests() {
   for (const req of entries) {
     const item = el("div", { class: "reqItem" });
 
+    const nameBtn = el("button", {
+      class: "reqName",
+      text: req.fromDisplay || "Unknown",
+      type: "button",
+      title: "Open DM",
+      "aria-label": `Open DM with ${req.fromDisplay || "Unknown"}`
+    });
+    nameBtn.addEventListener("click", async () => {
+      if (!req.fromUid) return;
+      const dmId = deterministicDmId(S.uid, req.fromUid);
+      await upsertMyChatRef("dm", dmId, req.fromDisplay || "Friend", null, undefined, "DM", { preserveLastAt: true });
+      await refreshChats();
+      await openChat({ type: "dm", id: dmId, name: req.fromDisplay || "Friend" });
+    });
+
     const left = el("div", { class: "reqLeft" }, [
-      el("div", { class: "reqName", text: req.fromDisplay || "Unknown" }),
+      nameBtn,
       el("div", { class: "reqMeta", text: `Request • ${formatDateShort(req.createdAt)} ${formatTime(req.createdAt)}` })
     ]);
 
@@ -2709,6 +2736,23 @@ async function ensureDmChatRefExists(chat) {
   await upsertMyChatRef("dm", chat.id, friendDisplay, friendPhoto, undefined, "DM", { preserveLastAt: true });
 }
 
+async function ensureDmChatRefForIncoming(dmId, lastAt, content) {
+  const parts = String(dmId).split("_");
+  const other = parts.find((p) => p !== S.uid) || null;
+  if (!other) return;
+  const pub = await get(ref(db, `publicUsers/${other}`));
+  const friendDisplay = pub.exists() ? (pub.val()?.displayNameDisplay || "Friend") : "Friend";
+  const friendPhoto = pub.exists() ? (pub.val()?.photoURL || null) : null;
+  await upsertMyChatRef("dm", dmId, friendDisplay, friendPhoto, lastAt, (content || "").slice(0, 90));
+}
+
+async function ensureGroupChatRefForIncoming(groupId, lastAt, content) {
+  const gSnap = await get(ref(db, `groupDms/${groupId}`));
+  const g = gSnap.exists() ? gSnap.val() : null;
+  const name = g?.name || "Group DM";
+  await upsertMyChatRef("group", groupId, name, null, lastAt, (content || "").slice(0, 90));
+}
+
 async function subscribeMessagesDm(dmId) {
   const msgRef = ref(db, `dmMessages/${dmId}`);
   const q = query(msgRef, orderByChild("createdAt"), limitToLast(LOAD_LAST_N));
@@ -2725,6 +2769,7 @@ async function subscribeMessagesDm(dmId) {
     if (!v) return;
 
     const authorDisplay = await getAuthorDisplay(v.authorId);
+    await ensureDmChatRefForIncoming(dmId, v.createdAt || nowMs(), v.content || "");
     addMessageToUI({
       authorId: v.authorId,
       authorDisplay,
@@ -2769,6 +2814,7 @@ async function subscribeMessagesGroup(groupId) {
     if (!v) return;
 
     const authorDisplay = await getAuthorDisplay(v.authorId);
+    await ensureGroupChatRefForIncoming(groupId, v.createdAt || nowMs(), v.content || "");
     addMessageToUI({
       authorId: v.authorId,
       authorDisplay,
