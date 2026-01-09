@@ -27,7 +27,8 @@ import {
   query,
   orderByChild,
   limitToLast,
-  equalTo
+  equalTo,
+  runTransaction
 } from "https://www.gstatic.com/firebasejs/11.5.0/firebase-database.js";
 import NAME_BLOCKLIST from "./name-blocklist.js";
 import { createCommandHandler } from "./commands.js";
@@ -52,6 +53,8 @@ const BRAND_NAME = "StaticQuasar931";
 const BRAND_LINK = "https://sites.google.com/view/staticquasar931/gm3z";
 const RESERVED_NAMES = ["staticquasar931", "static"];
 const RESERVED_PARTS = ["static", "quasar", "quasar931"];
+const PEOPLE_ROOT = "people";
+const PEOPLE_DISPLAYNAMES = "peopleDisplayNames";
 
 const THEMES = ["dark", "light", "ocean", "forest", "sunset", "lavender", "midnight", "rose", "neon", "sand", "icy"];
 const DEFAULT_THEME = "dark";
@@ -371,7 +374,7 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     padding:8px 10px;
     border:1px solid var(--border);
     border-radius:12px;
-    background: rgba(0,0,0,.08);
+    background: var(--panel2);
     cursor:pointer;
     text-align:left;
   }
@@ -387,7 +390,7 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     gap:12px;
   }
   .topLeft{ min-width:0; }
-  .topRight{ display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+  .topRight{ display:flex; align-items:center; gap:8px; flex:0 0 auto; position:relative; }
   .chatTitle{ font-weight:950; font-size:16px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .chatSub{ font-size:12px; color:var(--muted); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
   .copyable{ cursor:pointer; }
@@ -648,9 +651,9 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
   .kbd{ display:inline-block; padding:2px 6px; border-radius:8px; border:1px solid var(--border); background: rgba(0,0,0,.18); font-weight:900; font-size:12px; color: var(--text); }
 
   .toastWrap{
-    position: fixed;
-    top: 14px;
-    right: 14px;
+    position: absolute;
+    top: calc(100% + 10px);
+    right: 0;
     display:flex;
     flex-direction:column;
     gap:10px;
@@ -703,7 +706,17 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     border-radius: 14px;
     background: rgba(0,0,0,.10);
   }
-  .reqLeft{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .reqLeft{ display:flex; gap:10px; align-items:center; min-width:0; }
+  .reqText{ display:flex; flex-direction:column; gap:2px; min-width:0; }
+  .reqAvatar{
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    background: rgba(0,0,0,.18);
+    flex: 0 0 auto;
+  }
   .reqName{
     font-weight: 950;
     font-size: 13px;
@@ -808,6 +821,8 @@ const S = {
   userDataUnsub: null,
   chatRefsUnsub: null,
   publicUsersUnsub: null,
+  dmListUnsub: null,
+  dmPreviewUnsubs: {},
   reactionUnsubs: [],
 
   lastSendAt: 0,
@@ -819,6 +834,7 @@ const S = {
   idleTimer: null,
   dingAudio: null,
   autoOpenInProgress: false,
+  sessionId: null,
 
   ui: {},
 
@@ -833,6 +849,75 @@ const S = {
    UTIL
 ---------------------------- */
 function nowMs() { return Date.now(); }
+
+function peoplePublicPath(uid) {
+  return `${PEOPLE_ROOT}/${uid}/public`;
+}
+
+function peoplePrivatePath(uid) {
+  return `${PEOPLE_ROOT}/${uid}/private`;
+}
+
+function peopleStatsPath(uid) {
+  return `${PEOPLE_ROOT}/${uid}/stats`;
+}
+
+async function updatePeoplePublic(uid, data) {
+  await update(ref(db, peoplePublicPath(uid)), data).catch(() => {});
+  await update(ref(db, `publicUsers/${uid}`), data).catch(() => {});
+}
+
+async function updatePeoplePrivate(uid, data) {
+  await update(ref(db, peoplePrivatePath(uid)), data).catch(() => {});
+  await update(ref(db, `users/${uid}`), data).catch(() => {});
+}
+
+async function setPeoplePublic(uid, data) {
+  await set(ref(db, peoplePublicPath(uid)), data).catch(() => {});
+  await set(ref(db, `publicUsers/${uid}`), data).catch(() => {});
+}
+
+async function setPeoplePrivate(uid, data) {
+  await set(ref(db, peoplePrivatePath(uid)), data).catch(() => {});
+  await set(ref(db, `users/${uid}`), data).catch(() => {});
+}
+
+async function removePeoplePrivate(uid, childPath) {
+  await remove(ref(db, `${peoplePrivatePath(uid)}/${childPath}`)).catch(() => {});
+  await remove(ref(db, `users/${uid}/${childPath}`)).catch(() => {});
+}
+
+async function logStatEvent(uid, type, data = {}) {
+  if (!uid) return;
+  const payload = { type, at: nowMs(), ...data };
+  await push(ref(db, `${peopleStatsPath(uid)}/events`), payload).catch(() => {});
+  await push(ref(db, `users/${uid}/stats/events`), payload).catch(() => {});
+}
+
+async function incrementStatCounter(uid, key, delta = 1) {
+  if (!uid) return;
+  const peopleRef = ref(db, `${peopleStatsPath(uid)}/counters/${key}`);
+  const legacyRef = ref(db, `users/${uid}/stats/counters/${key}`);
+  await runTransaction(peopleRef, (value) => (value || 0) + delta).catch(() => {});
+  await runTransaction(legacyRef, (value) => (value || 0) + delta).catch(() => {});
+}
+
+function createSessionId() {
+  return `sess_${nowMs()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function startSessionTracking() {
+  if (!S.uid) return;
+  const sessionId = createSessionId();
+  S.sessionId = sessionId;
+  const payload = { startedAt: nowMs(), endedAt: null };
+  const peopleRef = ref(db, `${peopleStatsPath(S.uid)}/sessions/${sessionId}`);
+  const legacyRef = ref(db, `users/${S.uid}/stats/sessions/${sessionId}`);
+  await set(peopleRef, payload).catch(() => {});
+  await set(legacyRef, payload).catch(() => {});
+  onDisconnect(peopleRef).update({ endedAt: nowMs() }).catch(() => {});
+  onDisconnect(legacyRef).update({ endedAt: nowMs() }).catch(() => {});
+}
 
 function normalizeDisplayName(name) {
   return String(name || "").trim().toLowerCase();
@@ -1016,7 +1101,7 @@ function showContextMenu(x, y, items = []) {
 }
 
 function showToast(msg, kind = "info") {
-  const wrap = document.getElementById("toastWrap") || el("div", { id: "toastWrap", class: "toastWrap" });
+  const wrap = S.ui?.toastWrap || document.getElementById("toastWrap") || el("div", { id: "toastWrap", class: "toastWrap" });
   if (!wrap.parentNode) document.body.appendChild(wrap);
 
   const klass =
@@ -1370,8 +1455,8 @@ async function setPresenceStatus(status, { updateLastSeen = false } = {}) {
   S.presenceStatus = status;
   const payload = { status };
   if (updateLastSeen) payload.lastSeen = nowMs();
-  await update(ref(db, `users/${S.uid}`), payload).catch(() => {});
-  await update(ref(db, `publicUsers/${S.uid}`), payload).catch(() => {});
+  await updatePeoplePrivate(S.uid, payload);
+  await updatePeoplePublic(S.uid, payload);
   await update(ref(db, `presence/${S.uid}`), payload).catch(() => {});
 }
 
@@ -1475,64 +1560,97 @@ function getFriendlyAuthError(e) {
 ---------------------------- */
 async function ensureUserProfile(user) {
   const uid = user.uid;
-  const userRef = ref(db, `users/${uid}`);
-  const snap = await get(userRef);
+  const privateRef = ref(db, peoplePrivatePath(uid));
+  const snap = await get(privateRef);
+  const legacySnap = snap.exists() ? null : await get(ref(db, `users/${uid}`));
+  const legacy = legacySnap?.exists() ? (legacySnap.val() || {}) : {};
+  const existing = snap.exists() ? (snap.val() || {}) : legacy;
 
-  const base = {
+  const basePrivate = {
     uid,
-    email: user.email || null,
-    photoURL: user.photoURL || null,
-    displayNameDisplay: null,
-    displayNameNormalized: null,
-    theme: DEFAULT_THEME,
+    email: user.email || legacy?.email || null,
+    photoURL: user.photoURL || legacy?.photoURL || null,
+    displayNameDisplay: legacy?.displayNameDisplay || null,
+    displayNameNormalized: legacy?.displayNameNormalized || null,
+    theme: legacy?.theme || DEFAULT_THEME,
     settings: {
       useGoogleAvatar: true,
       notifications: true,
       messageSounds: true
     },
-    createdAt: nowMs(),
+    friendRequestsIn: {},
+    friendRequestsOut: {},
+    friends: {},
+    blocks: {},
+    reportsIn: {},
+    reportsOut: {},
+    chatRefs: {},
+    chatState: {},
+    nameHistory: legacy?.nameHistory || { current: null, previous: [] },
+    createdAt: legacy?.createdAt || nowMs(),
     lastLogin: nowMs(),
-    lastSeen: nowMs(),
-    status: "online",
+    lastSeen: legacy?.lastSeen || nowMs(),
+    status: legacy?.status || "online",
     typing: false,
-    messagesSent: 0
+    messagesSent: legacy?.messagesSent || 0
   };
 
   if (!snap.exists()) {
-    await set(userRef, base);
+    await setPeoplePrivate(uid, basePrivate);
+    const baseStats = {
+      counters: {
+        logins: 0,
+        friendRequestsSent: 0,
+        friendRequestsAccepted: 0,
+        friendRequestsDeclined: 0,
+        usersBlocked: 0,
+        messagesSent: 0
+      },
+      sessions: {}
+    };
+    await set(ref(db, peopleStatsPath(uid)), baseStats).catch(() => {});
+    await set(ref(db, `users/${uid}/stats`), baseStats).catch(() => {});
   } else {
-    await update(userRef, {
+    await updatePeoplePrivate(uid, {
       email: user.email || null,
       photoURL: user.photoURL || null,
       lastLogin: nowMs(),
       lastSeen: nowMs(),
       status: "online",
       settings: {
-        useGoogleAvatar: snap.val()?.settings?.useGoogleAvatar !== false,
-        notifications: snap.val()?.settings?.notifications !== false,
-        messageSounds: snap.val()?.settings?.messageSounds !== false
+        useGoogleAvatar: existing?.settings?.useGoogleAvatar !== false,
+        notifications: existing?.settings?.notifications !== false,
+        messageSounds: existing?.settings?.messageSounds !== false
       }
     });
   }
 
-  const pubRef = ref(db, `publicUsers/${uid}`);
-  await update(pubRef, {
+  const publicPayload = {
     uid,
-    displayNameDisplay: snap.exists() ? (snap.val()?.displayNameDisplay || null) : null,
-    displayNameNormalized: snap.exists() ? (snap.val()?.displayNameNormalized || null) : null,
-    photoURL: user.photoURL || null,
+    displayNameDisplay: existing.displayNameDisplay || null,
+    displayNameNormalized: existing.displayNameNormalized || null,
+    photoURL: user.photoURL || existing.photoURL || null,
     lastSeen: nowMs(),
     status: "online"
-  }).catch(() => {});
+  };
+  await updatePeoplePublic(uid, publicPayload);
 
   const presenceRef = ref(db, `presence/${uid}`);
   await update(presenceRef, { status: "online", lastSeen: nowMs() }).catch(() => {});
   onDisconnect(presenceRef).update({ status: "offline", lastSeen: nowMs() }).catch(() => {});
+  onDisconnect(ref(db, peoplePrivatePath(uid))).update({ status: "offline", lastSeen: nowMs() }).catch(() => {});
+  onDisconnect(ref(db, peoplePublicPath(uid))).update({ status: "offline", lastSeen: nowMs() }).catch(() => {});
   onDisconnect(ref(db, `users/${uid}`)).update({ status: "offline", lastSeen: nowMs() }).catch(() => {});
   onDisconnect(ref(db, `publicUsers/${uid}`)).update({ status: "offline", lastSeen: nowMs() }).catch(() => {});
+
+  await incrementStatCounter(uid, "logins", 1);
+  await logStatEvent(uid, "login", { provider: user.providerData?.[0]?.providerId || "unknown" });
+  await startSessionTracking();
 }
 
 async function loadProfile(uid) {
+  const peopleSnap = await get(ref(db, peoplePrivatePath(uid)));
+  if (peopleSnap.exists()) return peopleSnap.val();
   const snap = await get(ref(db, `users/${uid}`));
   return snap.exists() ? snap.val() : null;
 }
@@ -1550,12 +1668,24 @@ async function loadIsAdmin(uid) {
    DISPLAY NAME MODAL
 ---------------------------- */
 async function isDisplayNameTaken(normalized, myUid) {
-  const snap = await get(ref(db, "publicUsers"));
+  const indexSnap = await get(ref(db, PEOPLE_DISPLAYNAMES));
+  if (indexSnap.exists()) {
+    const owner = indexSnap.val()?.[normalized] || null;
+    if (owner && owner !== myUid) return true;
+  }
+
+  const legacyIndex = await get(ref(db, "displayNames"));
+  if (legacyIndex.exists()) {
+    const owner = legacyIndex.val()?.[normalized] || null;
+    if (owner && owner !== myUid) return true;
+  }
+
+  const snap = await get(ref(db, PEOPLE_ROOT));
   if (!snap.exists()) return false;
   const all = snap.val() || {};
   for (const [uid, u] of Object.entries(all)) {
     if (uid === myUid) continue;
-    const dn = normalizeDisplayName(u?.displayNameDisplay || "");
+    const dn = normalizeDisplayName(u?.public?.displayNameDisplay || "");
     if (dn && dn === normalized) return true;
   }
   return false;
@@ -1578,7 +1708,7 @@ async function applyDisplayName(nextName, previousName, reason) {
     previous: prevList.slice(0, 12)
   };
 
-  await update(ref(db, `users/${S.uid}`), {
+  await updatePeoplePrivate(S.uid, {
     displayNameDisplay: raw,
     displayNameNormalized: normalized,
     nameHistory,
@@ -1590,7 +1720,7 @@ async function applyDisplayName(nextName, previousName, reason) {
     }
   });
 
-  await update(ref(db, `publicUsers/${S.uid}`), {
+  await updatePeoplePublic(S.uid, {
     uid: S.uid,
     displayNameDisplay: raw,
     displayNameNormalized: normalized,
@@ -1603,8 +1733,10 @@ async function applyDisplayName(nextName, previousName, reason) {
 
   if (previousNormalized && previousNormalized !== normalized) {
     await remove(ref(db, `displayNames/${previousNormalized}`)).catch(() => {});
+    await remove(ref(db, `${PEOPLE_DISPLAYNAMES}/${previousNormalized}`)).catch(() => {});
   }
   await set(ref(db, `displayNames/${normalized}`), S.uid);
+  await set(ref(db, `${PEOPLE_DISPLAYNAMES}/${normalized}`), S.uid);
   return true;
 }
 
@@ -1642,6 +1774,7 @@ function openDisplayNameModal(user) {
   const avatarToggle = avatarRow.querySelector("input");
   avatarToggle.checked = S.profile?.settings?.useGoogleAvatar !== false;
   avatarToggle.addEventListener("change", async () => {
+    await updatePeoplePrivate(S.uid, { settings: { ...S.profile?.settings, useGoogleAvatar: avatarToggle.checked } });
     await update(ref(db, `users/${S.uid}/settings`), { useGoogleAvatar: avatarToggle.checked }).catch((e) => logFirebaseError("update-avatar-setting", e));
   });
 
@@ -1761,6 +1894,7 @@ async function reportNameIssue(attemptedName, flaggedWord) {
     };
     const repRef = push(ref(db, "reports"));
     await set(repRef, payload);
+    await logStatEvent(S.uid, "name-report-sent", { flaggedWord });
     showToast("Report sent.", "ok");
   } catch (e) {
     logFirebaseError("report-name", e);
@@ -1789,7 +1923,8 @@ function applyTheme(theme) {
 async function saveThemeToCloud(theme) {
   if (!S.uid) return;
   try {
-    await update(ref(db, `users/${S.uid}`), { theme });
+    await updatePeoplePrivate(S.uid, { theme });
+    await update(ref(db, `users/${S.uid}`), { theme }).catch(() => {});
   } catch {}
 }
 
@@ -1943,6 +2078,7 @@ function renderShell() {
     el("div", { class: "chatTitle", id: "chatTitle", text: "Select a chat" }),
     el("div", { class: "chatSub", id: "chatSub", text: "Add a friend or create a group DM." })
   ]);
+  const toastWrap = el("div", { id: "toastWrap", class: "toastWrap", "aria-live": "polite" });
   const topRight = el("div", { class: "topRight" }, [
     el("div", { class: "pill", id: "mePill" }, [
       el("span", { text: "You:" }),
@@ -1950,7 +2086,8 @@ function renderShell() {
     ]),
     el("button", { class: "iconBtn", title: "Group Info", onclick: openGroupInfoModal }, ["ℹ️"]),
     el("button", { class: "iconBtn", id: "themeBtn", title: "Theme", onclick: openThemeModal }, [svgPalette()]),
-    el("button", { class: "iconBtn", title: "Settings", onclick: openSettingsModal }, [svgGear()])
+    el("button", { class: "iconBtn", title: "Settings", onclick: openSettingsModal }, [svgGear()]),
+    toastWrap
   ]);
   topBar.appendChild(topLeft);
   topBar.appendChild(topRight);
@@ -1992,6 +2129,7 @@ function renderShell() {
     themeBtn: topBar.querySelector("#themeBtn"),
     meName: topBar.querySelector("#meName"),
     mePill: topBar.querySelector("#mePill"),
+    toastWrap: topBar.querySelector("#toastWrap"),
     messages,
     msgBox: composer.querySelector("#msgBox"),
     sendBtn: composer.querySelector("#sendBtn"),
@@ -2112,9 +2250,18 @@ function renderFriendRequests() {
       await openChat({ type: "dm", id: dmId, name: req.fromDisplay || "Friend" });
     });
 
+    const avatar = el("img", {
+      class: "reqAvatar",
+      src: req.fromPhoto || BRAND_ICON,
+      alt: `${req.fromDisplay || "User"} avatar`,
+      loading: "lazy"
+    });
     const left = el("div", { class: "reqLeft" }, [
-      nameBtn,
-      el("div", { class: "reqMeta", text: `Request • ${formatDateShort(req.createdAt)} ${formatTime(req.createdAt)}` })
+      avatar,
+      el("div", { class: "reqText" }, [
+        nameBtn,
+        el("div", { class: "reqMeta", text: `Request • ${formatDateShort(req.createdAt)} ${formatTime(req.createdAt)}` })
+      ])
     ]);
 
     const btns = el("div", { class: "reqBtns" }, [
@@ -2134,17 +2281,17 @@ async function sendFriendRequestByDisplayOrEmail(input) {
 
   const normalized = normalizeDisplayName(raw);
 
-  const pubSnap = await get(ref(db, "publicUsers"));
-  if (!pubSnap.exists()) throw new Error("No users found yet.");
-  const all = pubSnap.val() || {};
+  const peopleSnap = await get(ref(db, PEOPLE_ROOT));
+  if (!peopleSnap.exists()) throw new Error("No users found yet.");
+  const all = peopleSnap.val() || {};
 
   let targetUid = null;
   let targetDisplay = null;
   for (const [uid, u] of Object.entries(all)) {
-    const dn = normalizeDisplayName(u?.displayNameDisplay || "");
+    const dn = normalizeDisplayName(u?.public?.displayNameDisplay || "");
     if (dn && dn === normalized) {
       targetUid = uid;
-      targetDisplay = u?.displayNameDisplay || raw;
+      targetDisplay = u?.public?.displayNameDisplay || raw;
       break;
     }
   }
@@ -2152,30 +2299,52 @@ async function sendFriendRequestByDisplayOrEmail(input) {
   if (!targetUid) throw new Error("User not found (display name).");
   if (targetUid === S.uid) throw new Error("You can’t add yourself.");
 
-  const fSnap = await get(ref(db, `users/${S.uid}/friends/${targetUid}`));
+  const fSnap = await get(ref(db, `${peoplePrivatePath(S.uid)}/friends/${targetUid}`));
   if (fSnap.exists()) throw new Error("You are already friends.");
 
-  const blockSnap = await get(ref(db, `users/${S.uid}/blocks/${targetUid}`));
+  const blockSnap = await get(ref(db, `${peoplePrivatePath(S.uid)}/blocks/${targetUid}`));
   if (blockSnap.exists()) throw new Error("You blocked this user.");
 
+  const fromPhoto = S.profile?.photoURL || S.user?.photoURL || null;
+  await update(ref(db, `${peoplePrivatePath(S.uid)}/friendRequestsOut/${targetUid}`), {
+    toUid: targetUid,
+    toDisplay: targetDisplay,
+    createdAt: nowMs(),
+    toPhoto: all?.[targetUid]?.public?.photoURL || null
+  });
+
+  await update(ref(db, `${peoplePrivatePath(targetUid)}/friendRequestsIn/${S.uid}`), {
+    fromUid: S.uid,
+    fromDisplay: S.profile.displayNameDisplay,
+    fromPhoto,
+    createdAt: nowMs()
+  });
   await update(ref(db, `users/${S.uid}/friendRequestsOut/${targetUid}`), {
     toUid: targetUid,
     toDisplay: targetDisplay,
-    createdAt: nowMs()
-  });
-
+    createdAt: nowMs(),
+    toPhoto: all?.[targetUid]?.public?.photoURL || null
+  }).catch(() => {});
   await update(ref(db, `users/${targetUid}/friendRequestsIn/${S.uid}`), {
     fromUid: S.uid,
     fromDisplay: S.profile.displayNameDisplay,
+    fromPhoto,
     createdAt: nowMs()
-  });
+  }).catch(() => {});
 
+  await incrementStatCounter(S.uid, "friendRequestsSent", 1);
+  await logStatEvent(S.uid, "friend-request-sent", { toUid: targetUid });
   showToast(`Friend request sent to ${targetDisplay}.`, "ok");
 }
 
 async function declineFriendRequest(fromUid) {
   try {
-    await remove(ref(db, `users/${S.uid}/friendRequestsIn/${fromUid}`));
+    await remove(ref(db, `${peoplePrivatePath(S.uid)}/friendRequestsIn/${fromUid}`));
+    await remove(ref(db, `${peoplePrivatePath(fromUid)}/friendRequestsOut/${S.uid}`));
+    await remove(ref(db, `users/${S.uid}/friendRequestsIn/${fromUid}`)).catch(() => {});
+    await remove(ref(db, `users/${fromUid}/friendRequestsOut/${S.uid}`)).catch(() => {});
+    await incrementStatCounter(S.uid, "friendRequestsDeclined", 1);
+    await logStatEvent(S.uid, "friend-request-declined", { fromUid });
     showToast("Request declined.", "ok");
   } catch {
     showToast("Failed to decline.", "error");
@@ -2188,27 +2357,29 @@ function deterministicDmId(a, b) {
 
 async function acceptFriendRequest(fromUid) {
   try {
-    const pub = await get(ref(db, `publicUsers/${fromUid}`));
+    const pub = await get(ref(db, peoplePublicPath(fromUid)));
     const friendDisplay = pub.exists() ? (pub.val()?.displayNameDisplay || "Friend") : "Friend";
     const friendPhoto = pub.exists() ? (pub.val()?.photoURL || null) : null;
     const myDisplay = S.profile?.displayNameDisplay || "Friend";
     const myPhoto = S.user?.photoURL || null;
 
-    await update(ref(db, `users/${S.uid}/friends/${fromUid}`), {
+    await update(ref(db, `${peoplePrivatePath(S.uid)}/friends/${fromUid}`), {
       uid: fromUid,
       displayNameDisplay: friendDisplay,
       photoURL: friendPhoto,
       since: nowMs()
     });
 
-    await update(ref(db, `users/${fromUid}/friends/${S.uid}`), {
+    await update(ref(db, `${peoplePrivatePath(fromUid)}/friends/${S.uid}`), {
       uid: S.uid,
       displayNameDisplay: myDisplay,
       photoURL: myPhoto,
       since: nowMs()
     }).catch(() => {});
 
-    await remove(ref(db, `users/${S.uid}/friendRequestsIn/${fromUid}`));
+    await remove(ref(db, `${peoplePrivatePath(S.uid)}/friendRequestsIn/${fromUid}`));
+    await remove(ref(db, `${peoplePrivatePath(fromUid)}/friendRequestsOut/${S.uid}`)).catch(() => {});
+    await remove(ref(db, `users/${S.uid}/friendRequestsIn/${fromUid}`)).catch(() => {});
     await remove(ref(db, `users/${fromUid}/friendRequestsOut/${S.uid}`)).catch(() => {});
 
     const dmId = deterministicDmId(S.uid, fromUid);
@@ -2225,6 +2396,15 @@ async function acceptFriendRequest(fromUid) {
     }).catch(() => {});
 
     await upsertMyChatRef("dm", dmId, friendDisplay, friendPhoto, nowMs());
+    await update(ref(db, `${peoplePrivatePath(fromUid)}/chatRefs/${scopeKey("dm", dmId)}`), {
+      type: "dm",
+      id: dmId,
+      name: myDisplay,
+      photoURL: myPhoto,
+      lastAt: nowMs(),
+      sub: "",
+      hidden: false
+    }).catch(() => {});
     await update(ref(db, `users/${fromUid}/chatRefs/${scopeKey("dm", dmId)}`), {
       type: "dm",
       id: dmId,
@@ -2235,6 +2415,8 @@ async function acceptFriendRequest(fromUid) {
       hidden: false
     }).catch(() => {});
 
+    await incrementStatCounter(S.uid, "friendRequestsAccepted", 1);
+    await logStatEvent(S.uid, "friend-request-accepted", { fromUid });
     showToast(`Friends with ${friendDisplay}. DM created.`, "ok");
     await refreshChats();
     await openChat({ type: "dm", id: dmId, name: friendDisplay, photoURL: friendPhoto, members: [S.uid, fromUid] });
@@ -2268,6 +2450,7 @@ async function upsertMyChatRef(type, id, name, photoURL, lastAt, sub, options = 
     obj.lastAt = nowMs();
   }
 
+  await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${key}`), obj).catch(() => {});
   await update(ref(db, `users/${S.uid}/chatRefs/${key}`), obj).catch(() => {});
 }
 
@@ -2280,29 +2463,41 @@ async function clearActiveChat() {
 
 async function hideChatRef(type, id) {
   const key = scopeKey(type, id);
+  await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${key}`), { hidden: true }).catch(() => {});
   await update(ref(db, `users/${S.uid}/chatRefs/${key}`), { hidden: true }).catch(() => {});
 }
 
 async function unhideChatRef(type, id) {
   const key = scopeKey(type, id);
+  await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${key}`), { hidden: false }).catch(() => {});
   await update(ref(db, `users/${S.uid}/chatRefs/${key}`), { hidden: false }).catch(() => {});
 }
 
 async function setLastRead(type, id, ts) {
   const key = scopeKey(type, id);
+  await update(ref(db, `${peoplePrivatePath(S.uid)}/chatState/${key}`), { lastReadAt: ts || nowMs() }).catch(() => {});
   await update(ref(db, `users/${S.uid}/chatState/${key}`), { lastReadAt: ts || nowMs() }).catch(() => {});
 }
 
 async function loadMyChatState() {
-  const snap = await get(ref(db, `users/${S.uid}/chatState`));
-  S.chatState = snap.exists() ? (snap.val() || {}) : {};
+  const snap = await get(ref(db, `${peoplePrivatePath(S.uid)}/chatState`));
+  if (snap.exists()) {
+    S.chatState = snap.val() || {};
+  } else {
+    const legacy = await get(ref(db, `users/${S.uid}/chatState`));
+    S.chatState = legacy.exists() ? (legacy.val() || {}) : {};
+  }
 }
 
 async function updateUnreadCounts() {
   if (!S.uid) return;
 
-  const chatRefsSnap = await get(ref(db, `users/${S.uid}/chatRefs`));
-  const refsObj = chatRefsSnap.exists() ? (chatRefsSnap.val() || {}) : {};
+  let chatRefsSnap = await get(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs`));
+  let refsObj = chatRefsSnap.exists() ? (chatRefsSnap.val() || {}) : {};
+  if (!chatRefsSnap.exists()) {
+    chatRefsSnap = await get(ref(db, `users/${S.uid}/chatRefs`));
+    refsObj = chatRefsSnap.exists() ? (chatRefsSnap.val() || {}) : {};
+  }
   const refs = Object.values(refsObj);
 
   for (const c of refs) {
@@ -2321,6 +2516,7 @@ async function updateUnreadCounts() {
     if (!S.chatState[key]) S.chatState[key] = {};
     S.chatState[key].unread = unread;
 
+    await update(ref(db, `${peoplePrivatePath(S.uid)}/chatState/${key}`), { unread }).catch(() => {});
     await update(ref(db, `users/${S.uid}/chatState/${key}`), { unread }).catch(() => {});
   }
 
@@ -2630,7 +2826,12 @@ async function getAuthorDisplay(uid) {
   if (uid === S.uid) return S.profile?.displayNameDisplay || "You";
   if (S._nameCache[uid]) return S._nameCache[uid];
   try {
-    const pub = await get(ref(db, `publicUsers/${uid}`));
+    const cached = S.publicUsers?.[uid]?.displayNameDisplay;
+    if (cached) {
+      S._nameCache[uid] = cached;
+      return cached;
+    }
+    const pub = await get(ref(db, peoplePublicPath(uid)));
     const dn = pub.exists() ? (pub.val()?.displayNameDisplay || "User") : "User";
     S._nameCache[uid] = dn;
     return dn;
@@ -2724,7 +2925,7 @@ async function ensureDmChatRefExists(chat) {
 
   if (!other) return;
 
-  const pub = await get(ref(db, `publicUsers/${other}`));
+  const pub = await get(ref(db, peoplePublicPath(other)));
   const friendDisplay = pub.exists() ? (pub.val()?.displayNameDisplay || "Friend") : "Friend";
   const friendPhoto = pub.exists() ? (pub.val()?.photoURL || null) : null;
 
@@ -2740,7 +2941,7 @@ async function ensureDmChatRefForIncoming(dmId, lastAt, content) {
   const parts = String(dmId).split("_");
   const other = parts.find((p) => p !== S.uid) || null;
   if (!other) return;
-  const pub = await get(ref(db, `publicUsers/${other}`));
+  const pub = await get(ref(db, peoplePublicPath(other)));
   const friendDisplay = pub.exists() ? (pub.val()?.displayNameDisplay || "Friend") : "Friend";
   const friendPhoto = pub.exists() ? (pub.val()?.photoURL || null) : null;
   await upsertMyChatRef("dm", dmId, friendDisplay, friendPhoto, lastAt, (content || "").slice(0, 90));
@@ -2769,6 +2970,7 @@ async function subscribeMessagesDm(dmId) {
     if (!v) return;
 
     const authorDisplay = await getAuthorDisplay(v.authorId);
+    const hadChat = (S.chats || []).some((c) => c.type === "dm" && c.id === dmId);
     await ensureDmChatRefForIncoming(dmId, v.createdAt || nowMs(), v.content || "");
     addMessageToUI({
       authorId: v.authorId,
@@ -2783,10 +2985,20 @@ async function subscribeMessagesDm(dmId) {
       playMessageDing();
     }
 
+    await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${sk}`), {
+      lastAt: v.createdAt || nowMs(),
+      sub: (v.content || "").slice(0, 90)
+    }).catch(() => {});
     await update(ref(db, `users/${S.uid}/chatRefs/${sk}`), {
       lastAt: v.createdAt || nowMs(),
       sub: (v.content || "").slice(0, 90)
     }).catch(() => {});
+
+    if (!hadChat && v.authorId && v.authorId !== S.uid) {
+      await refreshChats();
+      const otherDisplay = v.authorId === S.uid ? S.profile?.displayNameDisplay : authorDisplay;
+      await openChat({ type: "dm", id: dmId, name: otherDisplay });
+    }
 
     if (!(S.active?.type === "dm" && S.active?.id === dmId && S.isWindowFocused)) {
       await updateUnreadCounts();
@@ -2828,6 +3040,10 @@ async function subscribeMessagesGroup(groupId) {
       playMessageDing();
     }
 
+    await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${sk}`), {
+      lastAt: v.createdAt || nowMs(),
+      sub: (v.content || "").slice(0, 90)
+    }).catch(() => {});
     await update(ref(db, `users/${S.uid}/chatRefs/${sk}`), {
       lastAt: v.createdAt || nowMs(),
       sub: (v.content || "").slice(0, 90)
@@ -2933,10 +3149,12 @@ async function onSendClicked() {
       await upsertMyChatRef("group", S.active.id, S.active.name, null, msgObj.createdAt, msgObj.content.slice(0, 90));
     }
 
-    await update(ref(db, `users/${S.uid}`), {
+    await updatePeoplePrivate(S.uid, {
       messagesSent: (S.profile?.messagesSent || 0) + 1,
       lastSeen: nowMs()
-    }).catch(() => {});
+    });
+    await incrementStatCounter(S.uid, "messagesSent", 1);
+    await logStatEvent(S.uid, "message-sent", { scopeType: S.active.type, scopeId: S.active.id });
 
     S.ui.msgBox.value = "";
     S.ui.countLine.textContent = `0 / ${MAX_MESSAGE_CHARS}`;
@@ -3008,6 +3226,7 @@ async function openReportModal(prefillReason = "") {
       };
       const repRef = push(ref(db, "reports"));
       await set(repRef, payload);
+      await logStatEvent(S.uid, "report-sent", { scope: payload.scope || "general" });
       showToast("Report sent.", "ok");
       m.close();
     } catch (e) {
@@ -3371,6 +3590,7 @@ function openSettingsModal() {
   const avatarToggle = avatarRow.querySelector("input");
   avatarToggle.checked = S.profile?.settings?.useGoogleAvatar !== false;
   avatarToggle.addEventListener("change", async () => {
+    await updatePeoplePrivate(S.uid, { settings: { ...S.profile?.settings, useGoogleAvatar: avatarToggle.checked } });
     await update(ref(db, `users/${S.uid}/settings`), { useGoogleAvatar: avatarToggle.checked }).catch(() => {});
     showToast("Avatar setting updated.", "ok");
     await refreshChats();
@@ -3422,7 +3642,8 @@ function openSettingsModal() {
         el("button", { class: "btn" }, ["Unblock"])
       ]);
       row.querySelector("button").addEventListener("click", async () => {
-        await remove(ref(db, `users/${S.uid}/blocks/${uid}`));
+        await removePeoplePrivate(S.uid, `blocks/${uid}`);
+        await logStatEvent(S.uid, "user-unblocked", { targetUid: uid });
         showToast("User unblocked.", "ok");
         row.remove();
       });
@@ -3490,16 +3711,19 @@ function svgUserPlus() { return el("span", { html: `<svg width="18" height="18" 
    REFRESH (friends/requests/chats) + AUTH BOOT
 ---------------------------- */
 async function refreshFriendsAndRequests() {
-  const uSnap = await get(ref(db, `users/${S.uid}`));
-  if (!uSnap.exists()) return;
-
-  const u = uSnap.val() || {};
-  S.profile = u;
+  const uSnap = await get(ref(db, `${peoplePrivatePath(S.uid)}`));
+  if (!uSnap.exists()) {
+    const legacy = await get(ref(db, `users/${S.uid}`));
+    if (!legacy.exists()) return;
+    S.profile = legacy.val() || {};
+  } else {
+    S.profile = uSnap.val() || {};
+  }
 
   if (S.ui?.meName) S.ui.meName.textContent = S.profile?.displayNameDisplay || "User";
 
-  const reqIn = u.friendRequestsIn || {};
-  const friends = u.friends || {};
+  const reqIn = S.profile.friendRequestsIn || {};
+  const friends = S.profile.friends || {};
   S.friendRequestsIn = reqIn;
   S.friends = friends;
 
@@ -3514,16 +3738,17 @@ async function syncFriendProfiles() {
 
   for (const req of reqs) {
     if (!req?.fromUid) continue;
-    const snap = await get(ref(db, `publicUsers/${req.fromUid}`));
+    const snap = await get(ref(db, peoplePublicPath(req.fromUid)));
     if (snap.exists()) {
       const u = snap.val() || {};
       req.fromDisplay = u.displayNameDisplay || req.fromDisplay;
+      req.fromPhoto = u.photoURL || req.fromPhoto || null;
     }
   }
 
   for (const friend of friends) {
     if (!friend?.uid) continue;
-    const snap = await get(ref(db, `publicUsers/${friend.uid}`));
+    const snap = await get(ref(db, peoplePublicPath(friend.uid)));
     if (snap.exists()) {
       const u = snap.val() || {};
       friend.displayNameDisplay = u.displayNameDisplay || friend.displayNameDisplay;
@@ -3554,8 +3779,12 @@ function hydrateChatRefs(refsObj = {}) {
 }
 
 async function refreshChats() {
-  const snap = await get(ref(db, `users/${S.uid}/chatRefs`));
-  const refsObj = snap.exists() ? (snap.val() || {}) : {};
+  let snap = await get(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs`));
+  let refsObj = snap.exists() ? (snap.val() || {}) : {};
+  if (!snap.exists()) {
+    snap = await get(ref(db, `users/${S.uid}/chatRefs`));
+    refsObj = snap.exists() ? (snap.val() || {}) : {};
+  }
   hydrateChatRefs(refsObj);
   if (!S.active && S.chats.length === 0) {
     renderHomePanel();
@@ -3579,36 +3808,102 @@ async function refreshAll() {
 
 function subscribeUserData() {
   if (S.userDataUnsub) { try { S.userDataUnsub(); } catch {} }
-  const userRef = ref(db, `users/${S.uid}`);
+  const userRef = ref(db, peoplePrivatePath(S.uid));
   const handler = onValue(userRef, (snap) => {
-    if (!snap.exists()) return;
-    const u = snap.val() || {};
-    S.profile = u;
-    if (S.ui?.meName) S.ui.meName.textContent = S.profile?.displayNameDisplay || "User";
-    S.friendRequestsIn = u.friendRequestsIn || {};
-    S.friends = u.friends || {};
-    if (u.chatState) S.chatState = u.chatState;
-    syncFriendProfiles().catch(() => {});
-    renderFriendRequests();
+    if (snap.exists()) {
+      const u = snap.val() || {};
+      S.profile = u;
+      if (S.ui?.meName) S.ui.meName.textContent = S.profile?.displayNameDisplay || "User";
+      S.friendRequestsIn = u.friendRequestsIn || {};
+      S.friends = u.friends || {};
+      if (u.chatState) S.chatState = u.chatState;
+      syncFriendProfiles().catch(() => {});
+      renderFriendRequests();
+      renderFriendsModalLists();
+      return;
+    }
+    get(ref(db, `users/${S.uid}`)).then((legacy) => {
+      if (!legacy.exists()) return;
+      const u = legacy.val() || {};
+      S.profile = u;
+      if (S.ui?.meName) S.ui.meName.textContent = S.profile?.displayNameDisplay || "User";
+      S.friendRequestsIn = u.friendRequestsIn || {};
+      S.friends = u.friends || {};
+      if (u.chatState) S.chatState = u.chatState;
+      syncFriendProfiles().catch(() => {});
+      renderFriendRequests();
+      renderFriendsModalLists();
+    }).catch(() => {});
   });
   S.userDataUnsub = () => off(userRef, "value", handler);
 }
 
 function subscribeChatRefs() {
   if (S.chatRefsUnsub) { try { S.chatRefsUnsub(); } catch {} }
-  const refPath = ref(db, `users/${S.uid}/chatRefs`);
+  const refPath = ref(db, `${peoplePrivatePath(S.uid)}/chatRefs`);
   const handler = onValue(refPath, (snap) => {
     const refsObj = snap.exists() ? (snap.val() || {}) : {};
-    hydrateChatRefs(refsObj);
+    if (snap.exists()) {
+      hydrateChatRefs(refsObj);
+    } else {
+      get(ref(db, `users/${S.uid}/chatRefs`)).then((legacy) => {
+        const legacyRefs = legacy.exists() ? (legacy.val() || {}) : {};
+        hydrateChatRefs(legacyRefs);
+      }).catch(() => {});
+    }
   });
   S.chatRefsUnsub = () => off(refPath, "value", handler);
 }
 
+function subscribeMyDms() {
+  if (S.dmListUnsub) { try { S.dmListUnsub(); } catch {} }
+  const dmRef = ref(db, "dms");
+  const dmQuery = query(dmRef, orderByChild(`memberIds/${S.uid}`), equalTo(true));
+  const handler = onChildAdded(dmQuery, (snap) => {
+    const dmId = snap.key;
+    if (!dmId) return;
+    subscribeDmPreview(dmId);
+  });
+  S.dmListUnsub = () => off(dmQuery, "child_added", handler);
+}
+
+function subscribeDmPreview(dmId) {
+  if (S.dmPreviewUnsubs[dmId]) return;
+  const msgRef = ref(db, `dmMessages/${dmId}`);
+  const msgQuery = query(msgRef, orderByChild("createdAt"), limitToLast(1));
+  const handler = onChildAdded(msgQuery, async (snap) => {
+    const v = snap.val();
+    if (!v) return;
+    await ensureDmChatRefForIncoming(dmId, v.createdAt || nowMs(), v.content || "");
+    const hadChat = (S.chats || []).some((c) => c.type === "dm" && c.id === dmId);
+    if (!hadChat && v.authorId && v.authorId !== S.uid) {
+      await refreshChats();
+      const authorDisplay = await getAuthorDisplay(v.authorId);
+      await openChat({ type: "dm", id: dmId, name: authorDisplay });
+    }
+  });
+  S.dmPreviewUnsubs[dmId] = () => off(msgQuery, "child_added", handler);
+}
+
 function subscribePublicUsers() {
   if (S.publicUsersUnsub) { try { S.publicUsersUnsub(); } catch {} }
-  const refPath = ref(db, "publicUsers");
+  const refPath = ref(db, PEOPLE_ROOT);
   const handler = onValue(refPath, (snap) => {
-    S.publicUsers = snap.exists() ? (snap.val() || {}) : {};
+    const raw = snap.exists() ? (snap.val() || {}) : {};
+    const map = {};
+    for (const [uid, node] of Object.entries(raw)) {
+      if (node?.public) map[uid] = node.public;
+    }
+    if (Object.keys(map).length) {
+      S.publicUsers = map;
+    } else {
+      S.publicUsers = {};
+      get(ref(db, "publicUsers")).then((legacy) => {
+        if (legacy.exists()) S.publicUsers = legacy.val() || {};
+        renderFriendsModalLists();
+        renderChatList();
+      }).catch(() => {});
+    }
     renderFriendsModalLists();
     renderChatList();
   });
@@ -3741,7 +4036,10 @@ function getOtherUidFromChat(chat) {
 
 async function blockUser(uid) {
   if (!uid) return;
+  await set(ref(db, `${peoplePrivatePath(S.uid)}/blocks/${uid}`), true).catch(() => {});
   await set(ref(db, `users/${S.uid}/blocks/${uid}`), true).catch(() => {});
+  await incrementStatCounter(S.uid, "usersBlocked", 1);
+  await logStatEvent(S.uid, "user-blocked", { targetUid: uid });
   await hideChatRef("dm", deterministicDmId(S.uid, uid)).catch(() => {});
   showToast("User blocked.", "ok");
   await refreshChats();
@@ -3749,7 +4047,9 @@ async function blockUser(uid) {
 
 async function unfriendUser(uid) {
   if (!uid) return;
+  await remove(ref(db, `${peoplePrivatePath(S.uid)}/friends/${uid}`)).catch(() => {});
   await remove(ref(db, `users/${S.uid}/friends/${uid}`)).catch(() => {});
+  await logStatEvent(S.uid, "friend-removed", { targetUid: uid });
   await hideChatRef("dm", deterministicDmId(S.uid, uid)).catch(() => {});
   showToast("Friend removed.", "ok");
   await refreshChats();
@@ -3821,9 +4121,13 @@ onAuthStateChanged(auth, async (user) => {
       S.chatState = {};
       S._nameCache = {};
       S._seenMsgKeys = {};
+      S.sessionId = null;
       clearChatListeners();
       if (S.userDataUnsub) { try { S.userDataUnsub(); } catch {} S.userDataUnsub = null; }
       if (S.chatRefsUnsub) { try { S.chatRefsUnsub(); } catch {} S.chatRefsUnsub = null; }
+      if (S.dmListUnsub) { try { S.dmListUnsub(); } catch {} S.dmListUnsub = null; }
+      Object.values(S.dmPreviewUnsubs || {}).forEach((unsub) => { try { unsub(); } catch {} });
+      S.dmPreviewUnsubs = {};
       applyTheme(DEFAULT_THEME);
       renderSignedOut();
       return;
@@ -3850,6 +4154,7 @@ onAuthStateChanged(auth, async (user) => {
     subscribeUserData();
     subscribeChatRefs();
     subscribePublicUsers();
+    subscribeMyDms();
     await refreshAll();
 
     // Keep lastSeen updated sometimes
@@ -3887,6 +4192,7 @@ onAuthStateChanged(auth, async (user) => {
   const notifyToggle = notifyRow.querySelector("input");
   notifyToggle.checked = S.profile?.settings?.notifications !== false;
   notifyToggle.addEventListener("change", async () => {
+    await updatePeoplePrivate(S.uid, { settings: { ...S.profile?.settings, notifications: notifyToggle.checked } });
     await update(ref(db, `users/${S.uid}/settings`), { notifications: notifyToggle.checked }).catch((e) => logFirebaseError("update-notifications", e));
   });
 
@@ -3897,5 +4203,6 @@ onAuthStateChanged(auth, async (user) => {
   const soundToggle = soundRow.querySelector("input");
   soundToggle.checked = S.profile?.settings?.messageSounds !== false;
   soundToggle.addEventListener("change", async () => {
+    await updatePeoplePrivate(S.uid, { settings: { ...S.profile?.settings, messageSounds: soundToggle.checked } });
     await update(ref(db, `users/${S.uid}/settings`), { messageSounds: soundToggle.checked }).catch((e) => logFirebaseError("update-message-sounds", e));
   });

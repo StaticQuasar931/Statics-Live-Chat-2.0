@@ -1,38 +1,29 @@
 # Statics Live Chat 2.0
 
-A lightweight, Firebase-powered chat app built for fast, simple conversations with DMs, group chats, emojis, and themes.
-This repository contains the ChatGPT Codex iteration of the project.
+Fast, friendly realtime chat with DMs, group rooms, emojis, and themes.
 
-## ✨ Highlights
-- **Google sign-in** with profile avatar support and per-user settings.
-- **Direct messages & group DMs** with reactions, typing indicators, and unread tracking.
-- **Display-name safety** with normalization, reserved-name checks, and a blocklist.
-- **Theme system** covering the full UI (panels, buttons, modals, loading screen).
-- **Emoji shortcuts & picker** plus link/preview rendering for media URLs.
+## ✨ What you get
+- **Google sign-in** with profile avatars and settings
+- **DMs + group chat** with reactions, typing, and unread badges
+- **Display-name safety** checks and a reserved-name blocklist
+- **Theme switcher** for the whole UI
+- **Emoji shortcuts** and a picker
 
-## 🔧 Tech Stack
-- **Firebase Auth** (Google provider)
-- **Firebase Realtime Database**
-- **Vanilla HTML/CSS/JS**
-
-## 🚀 Quick Start
+## 🚀 Quick start
 1. Clone the repo.
-2. Open `index.html` in a local server (recommended) or directly in a browser.
-3. Sign in with Google and start chatting.
+2. Run a local server, then open the page in your browser.
 
-> Tip: Use a local server for consistent auth behavior.
+Example:
+```bash
+python -m http.server 8000
+```
 
-## 📁 Project Structure
+## 📁 Key files
 - `index.html` – App shell
-- `app.js` – UI, state, and realtime chat logic
-- `commands.js` – Command responses and mini bot features
-- Firebase Realtime Database rules are managed outside of the repo
-- `name-blocklist.js` – Reserved/blocked display-name list
+- `app.js` – UI, state, and realtime logic
+- `commands.js` – Commands + mini bot responses
+- `styles/themes.css` – Theme tokens
+- `name-blocklist.js` – Blocked/reserved display names
 
-## ✅ Goals
-- Simple, clean UI
-- Safe display-name handling
-- Straightforward data structure for chat + users
-
-## 📣 Feedback
-If you spot issues or have ideas, feel free to open an issue or reach out.
+## 🌟 Goal
+Keep chat simple, safe, and fun.
