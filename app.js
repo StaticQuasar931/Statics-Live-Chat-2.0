@@ -318,24 +318,56 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     cursor:pointer;
     box-shadow: none;
     overflow: hidden;
+    transition: transform .12s ease;
   }
   .googleBtn:focus-visible{
     outline: 2px solid var(--accent);
     outline-offset: 4px;
   }
+  .googleBtn:hover{ transform: translateY(-2px); }
   .googleBtn:disabled{
     opacity: .6;
     cursor:not-allowed;
   }
   .googleBtn img{
-    width: 280px;
+    width: 340px;
     height: auto;
     display:block;
+    transition: transform .12s ease, filter .12s ease;
+  }
+  .googleBtn:hover img{
+    transform: scale(1.01);
+    filter: drop-shadow(0 12px 26px rgba(0,0,0,.25));
   }
   .authActions{
     display:flex;
     align-items:center;
     justify-content:center;
+  }
+  .authBrandRow{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:16px;
+    text-align:left;
+  }
+  .authBrandRow .authLogo{
+    width: 96px;
+    height: 96px;
+    border-radius: 22px;
+  }
+  .authBrandDetails{
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+  }
+  .authMetaLine{
+    display:flex;
+    flex-wrap:wrap;
+    gap:6px;
+    align-items:center;
+    color: var(--muted);
+    font-size: 13px;
   }
   .authFooter{
     display:flex;
@@ -1647,7 +1679,9 @@ function openSignInModal() {
       el("br"),
       "• Use /help for commands.",
       el("br"),
-      "• Display names have no spaces and are unique (case-insensitive)."
+      "• Display names have no spaces and are unique (case-insensitive).",
+      el("br"),
+      "• Privacy notice: We’re not responsible for user privacy or security. Please use at your own risk."
     ])
   ]);
 
@@ -1908,7 +1942,11 @@ async function applyDisplayName(nextName, previousName, reason) {
       });
     }
   }
-  await set(ref(db, `displayNames/${normalized}`), S.uid);
+  try {
+    await set(ref(db, `displayNames/${normalized}`), S.uid);
+  } catch {
+    // Legacy displayNames write failed; continue without blocking the UI.
+  }
   if (S.peopleWriteEnabled) {
     await set(ref(db, `${PEOPLE_DISPLAYNAMES}/${normalized}`), S.uid).catch((err) => {
       if (String(err?.code || "").includes("PERMISSION_DENIED")) {
@@ -2219,13 +2257,19 @@ function renderLoadingScreen() {
     el("img", { class: "authBanner", src: BRAND_BANNER, alt: `${BRAND_NAME} banner` })
   ]);
 
-  const brand = el("div", { class: "authBrand" }, [
+  const brand = el("div", { class: "authBrandRow" }, [
     el("a", { class: "logoBtn", href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
       el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` })
     ]),
-    el("div", { class: "authTitle", text: APP_NAME }),
-    el("div", { class: "small", text: APP_SECONDARY_NAME }),
-    el("div", { class: "authSubtitle", text: "Loading your chat experience..." })
+    el("div", { class: "authBrandDetails" }, [
+      el("div", { class: "authTitle", text: APP_NAME }),
+      el("div", { class: "small", text: APP_SECONDARY_NAME }),
+      el("div", { class: "authMetaLine" }, [
+        el("span", { text: "Made by" }),
+        el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [BRAND_NAME]),
+        el("span", { text: "• Loading your chat experience..." })
+      ])
+    ])
   ]);
 
   const adSlot = el("div", { class: "adSlot" });
