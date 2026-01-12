@@ -898,6 +898,7 @@ const S = {
 
   friendRequestsIn: {},
   friends: {},
+  friendRequestsOut: {},
   chats: [],
   publicUsers: {},
 
@@ -1023,6 +1024,32 @@ async function safeGet(refPath) {
   } catch {
     return null;
   }
+}
+
+async function updateMyChatRef(key, obj) {
+  if (S.peopleWriteEnabled) {
+    try {
+      await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${key}`), obj);
+    } catch (err) {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    }
+  }
+  await update(ref(db, `users/${S.uid}/chatRefs/${key}`), obj).catch(() => {});
+}
+
+async function updateMyChatState(key, obj) {
+  if (S.peopleWriteEnabled) {
+    try {
+      await update(ref(db, `${peoplePrivatePath(S.uid)}/chatState/${key}`), obj);
+    } catch (err) {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    }
+  }
+  await update(ref(db, `users/${S.uid}/chatState/${key}`), obj).catch(() => {});
 }
 
 async function logStatEvent(uid, type, data = {}) {
@@ -2313,6 +2340,8 @@ function renderShell() {
 
   const reqTitle = el("div", { class: "sectionTitle", text: "Friend Requests" });
   const requestList = el("div", { class: "requestList", id: "requestList" });
+  const outTitle = el("div", { class: "sectionTitle", text: "Outgoing Requests" });
+  const outgoingList = el("div", { class: "requestList", id: "outgoingList" });
 
   const chatTitle = el("div", { class: "sectionTitle", text: "Recent Chats" });
   const chatList = el("div", { class: "chatList", id: "chatList" });
@@ -2321,6 +2350,8 @@ function renderShell() {
   sidebar.appendChild(searchRow);
   sidebar.appendChild(reqTitle);
   sidebar.appendChild(requestList);
+  sidebar.appendChild(outTitle);
+  sidebar.appendChild(outgoingList);
   sidebar.appendChild(chatTitle);
   sidebar.appendChild(chatList);
 
@@ -2385,6 +2416,7 @@ function renderShell() {
   S.ui = {
     shell,
     requestList,
+    outgoingList,
     chatList,
     searchChats: searchRow.querySelector("#searchChats"),
     chatTitle: topBar.querySelector("#chatTitle"),
@@ -2539,6 +2571,58 @@ function renderFriendRequests() {
   }
 }
 
+function renderOutgoingRequests() {
+  const list = S.ui.outgoingList;
+  if (!list) return;
+  clear(list);
+
+  const entries = Object.values(S.friendRequestsOut || {}).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  if (!entries.length) {
+    list.appendChild(el("div", { class: "small", style: "padding: 0 12px 10px 12px;", text: "No outgoing requests." }));
+    return;
+  }
+
+  for (const req of entries) {
+    const item = el("div", { class: "reqItem" });
+    const nameBtn = el("button", {
+      class: "reqName",
+      text: req.toDisplay || "Unknown",
+      type: "button",
+      title: "Open DM",
+      "aria-label": `Open DM with ${req.toDisplay || "Unknown"}`
+    });
+    nameBtn.addEventListener("click", async () => {
+      if (!req.toUid) return;
+      const dmId = deterministicDmId(S.uid, req.toUid);
+      await upsertMyChatRef("dm", dmId, req.toDisplay || "Friend", null, undefined, "DM", { preserveLastAt: true });
+      await refreshChats();
+      await openChat({ type: "dm", id: dmId, name: req.toDisplay || "Friend" });
+    });
+
+    const avatar = el("img", {
+      class: "reqAvatar",
+      src: req.toPhoto || BRAND_ICON,
+      alt: `${req.toDisplay || "User"} avatar`,
+      loading: "lazy"
+    });
+    const left = el("div", { class: "reqLeft" }, [
+      avatar,
+      el("div", { class: "reqText" }, [
+        nameBtn,
+        el("div", { class: "reqMeta", text: `Pending • ${formatDateShort(req.createdAt)} ${formatTime(req.createdAt)}` })
+      ])
+    ]);
+
+    const btns = el("div", { class: "reqBtns" }, [
+      el("button", { class: "btnTiny no", onclick: () => cancelOutgoingRequest(req.toUid) }, ["✕"])
+    ]);
+
+    item.appendChild(left);
+    item.appendChild(btns);
+    list.appendChild(item);
+  }
+}
+
 async function sendFriendRequestByDisplayOrEmail(input) {
   const raw = String(input || "").trim();
   if (!raw) return;
@@ -2563,6 +2647,8 @@ async function sendFriendRequestByDisplayOrEmail(input) {
 
   if (!targetUid) throw new Error("User not found (display name).");
   if (targetUid === S.uid) throw new Error("You can’t add yourself.");
+  if (S.friends?.[targetUid]) throw new Error("You are already friends.");
+  if (S.friendRequestsOut?.[targetUid]) throw new Error("Friend request already sent.");
 
   const fSnap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/friends/${targetUid}`));
   const fLegacy = fSnap?.exists?.() ? null : await safeGet(ref(db, `users/${S.uid}/friends/${targetUid}`));
@@ -2603,6 +2689,42 @@ async function declineFriendRequest(fromUid) {
   }
 }
 
+async function cancelOutgoingRequest(toUid, { silent = false } = {}) {
+  if (!toUid) return;
+  await remove(ref(db, `users/${S.uid}/friendRequestsOut/${toUid}`)).catch(() => {});
+  await remove(ref(db, `users/${toUid}/friendRequestsIn/${S.uid}`)).catch(() => {});
+  if (!silent) showToast("Request canceled.", "ok");
+}
+
+async function ensureFriendshipFromOutgoing(otherUid, displayName, photoURL) {
+  if (!otherUid || S.friends?.[otherUid]) return;
+  if (!S.friendRequestsOut?.[otherUid]) return;
+  await update(ref(db, `users/${S.uid}/friends/${otherUid}`), {
+    uid: otherUid,
+    displayNameDisplay: displayName || "Friend",
+    photoURL: photoURL || null,
+    since: nowMs()
+  }).catch(() => {});
+  await remove(ref(db, `users/${S.uid}/friendRequestsOut/${otherUid}`)).catch(() => {});
+  await remove(ref(db, `users/${otherUid}/friendRequestsIn/${S.uid}`)).catch(() => {});
+}
+
+async function pruneOutgoingRequests() {
+  const outgoing = S.friendRequestsOut || {};
+  const outgoingIds = Object.keys(outgoing);
+  if (!outgoingIds.length) return;
+  for (const uid of outgoingIds) {
+    if (S.friends?.[uid]) {
+      await cancelOutgoingRequest(uid, { silent: true });
+      continue;
+    }
+    const hasDm = (S.chats || []).some((c) => c.type === "dm" && getOtherUidFromChat(c) === uid);
+    if (hasDm) {
+      await cancelOutgoingRequest(uid, { silent: true });
+    }
+  }
+}
+
 function deterministicDmId(a, b) {
   return [a, b].sort().join("_");
 }
@@ -2640,16 +2762,6 @@ async function acceptFriendRequest(fromUid) {
     }).catch(() => {});
 
     await upsertMyChatRef("dm", dmId, friendDisplay, friendPhoto, nowMs());
-    await update(ref(db, `users/${fromUid}/chatRefs/${scopeKey("dm", dmId)}`), {
-      type: "dm",
-      id: dmId,
-      name: myDisplay,
-      photoURL: myPhoto,
-      lastAt: nowMs(),
-      sub: "",
-      hidden: false
-    }).catch(() => {});
-
     await incrementStatCounter(S.uid, "friendRequestsAccepted", 1);
     await logStatEvent(S.uid, "friend-request-accepted", { fromUid });
     showToast(`Friends with ${friendDisplay}. DM created.`, "ok");
@@ -2685,8 +2797,7 @@ async function upsertMyChatRef(type, id, name, photoURL, lastAt, sub, options = 
     obj.lastAt = nowMs();
   }
 
-  await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${key}`), obj).catch(() => {});
-  await update(ref(db, `users/${S.uid}/chatRefs/${key}`), obj).catch(() => {});
+  await updateMyChatRef(key, obj);
 }
 
 async function clearActiveChat() {
@@ -2698,20 +2809,17 @@ async function clearActiveChat() {
 
 async function hideChatRef(type, id) {
   const key = scopeKey(type, id);
-  await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${key}`), { hidden: true }).catch(() => {});
-  await update(ref(db, `users/${S.uid}/chatRefs/${key}`), { hidden: true }).catch(() => {});
+  await updateMyChatRef(key, { hidden: true });
 }
 
 async function unhideChatRef(type, id) {
   const key = scopeKey(type, id);
-  await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${key}`), { hidden: false }).catch(() => {});
-  await update(ref(db, `users/${S.uid}/chatRefs/${key}`), { hidden: false }).catch(() => {});
+  await updateMyChatRef(key, { hidden: false });
 }
 
 async function setLastRead(type, id, ts) {
   const key = scopeKey(type, id);
-  await update(ref(db, `${peoplePrivatePath(S.uid)}/chatState/${key}`), { lastReadAt: ts || nowMs() }).catch(() => {});
-  await update(ref(db, `users/${S.uid}/chatState/${key}`), { lastReadAt: ts || nowMs() }).catch(() => {});
+  await updateMyChatState(key, { lastReadAt: ts || nowMs() });
 }
 
 async function loadMyChatState() {
@@ -2751,8 +2859,7 @@ async function updateUnreadCounts() {
     if (!S.chatState[key]) S.chatState[key] = {};
     S.chatState[key].unread = unread;
 
-    await update(ref(db, `${peoplePrivatePath(S.uid)}/chatState/${key}`), { unread }).catch(() => {});
-    await update(ref(db, `users/${S.uid}/chatState/${key}`), { unread }).catch(() => {});
+    await updateMyChatState(key, { unread });
   }
 
   await refreshChats();
@@ -3226,14 +3333,10 @@ async function subscribeMessagesDm(dmId) {
       playMessageDing();
     }
 
-    await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${sk}`), {
+    await updateMyChatRef(sk, {
       lastAt: v.createdAt || nowMs(),
       sub: (v.content || "").slice(0, 90)
-    }).catch(() => {});
-    await update(ref(db, `users/${S.uid}/chatRefs/${sk}`), {
-      lastAt: v.createdAt || nowMs(),
-      sub: (v.content || "").slice(0, 90)
-    }).catch(() => {});
+    });
 
     if (!hadChat && v.authorId && v.authorId !== S.uid) {
       await refreshChats();
@@ -3281,14 +3384,10 @@ async function subscribeMessagesGroup(groupId) {
       playMessageDing();
     }
 
-    await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${sk}`), {
+    await updateMyChatRef(sk, {
       lastAt: v.createdAt || nowMs(),
       sub: (v.content || "").slice(0, 90)
-    }).catch(() => {});
-    await update(ref(db, `users/${S.uid}/chatRefs/${sk}`), {
-      lastAt: v.createdAt || nowMs(),
-      sub: (v.content || "").slice(0, 90)
-    }).catch(() => {});
+    });
 
     if (!(S.active?.type === "group" && S.active?.id === groupId && S.isWindowFocused)) {
       await updateUnreadCounts();
@@ -3965,11 +4064,14 @@ async function refreshFriendsAndRequests() {
 
   const reqIn = S.profile.friendRequestsIn || {};
   const friends = S.profile.friends || {};
+  const reqOut = S.profile.friendRequestsOut || {};
   S.friendRequestsIn = reqIn;
   S.friends = friends;
+  S.friendRequestsOut = reqOut;
 
   syncFriendProfiles().catch(() => {});
   renderFriendRequests();
+  renderOutgoingRequests();
   renderFriendsModalLists();
 }
 
@@ -4044,6 +4146,7 @@ async function refreshAll() {
   await loadMyChatState();
   await refreshFriendsAndRequests();
   await refreshChats();
+  await pruneOutgoingRequests().catch(() => {});
   await updateUnreadCounts().catch(() => {});
 }
 
@@ -4056,10 +4159,12 @@ function subscribeUserData() {
       S.profile = u;
       if (S.ui?.meName) S.ui.meName.textContent = S.profile?.displayNameDisplay || "User";
       S.friendRequestsIn = u.friendRequestsIn || {};
+      S.friendRequestsOut = u.friendRequestsOut || {};
       S.friends = u.friends || {};
       if (u.chatState) S.chatState = u.chatState;
       syncFriendProfiles().catch(() => {});
       renderFriendRequests();
+      renderOutgoingRequests();
       renderFriendsModalLists();
       return;
     }
@@ -4069,10 +4174,12 @@ function subscribeUserData() {
       S.profile = u;
       if (S.ui?.meName) S.ui.meName.textContent = S.profile?.displayNameDisplay || "User";
       S.friendRequestsIn = u.friendRequestsIn || {};
+      S.friendRequestsOut = u.friendRequestsOut || {};
       S.friends = u.friends || {};
       if (u.chatState) S.chatState = u.chatState;
       syncFriendProfiles().catch(() => {});
       renderFriendRequests();
+      renderOutgoingRequests();
       renderFriendsModalLists();
     }).catch(() => {});
   }, () => {
@@ -4083,10 +4190,12 @@ function subscribeUserData() {
       S.profile = u;
       if (S.ui?.meName) S.ui.meName.textContent = S.profile?.displayNameDisplay || "User";
       S.friendRequestsIn = u.friendRequestsIn || {};
+      S.friendRequestsOut = u.friendRequestsOut || {};
       S.friends = u.friends || {};
       if (u.chatState) S.chatState = u.chatState;
       syncFriendProfiles().catch(() => {});
       renderFriendRequests();
+      renderOutgoingRequests();
       renderFriendsModalLists();
     });
     S.userDataUnsub = () => off(legacyRef, "value", legacyHandler);
@@ -4143,6 +4252,11 @@ function subscribeDmPreview(dmId) {
       await refreshChats();
       const authorDisplay = await getAuthorDisplay(v.authorId);
       await openChat({ type: "dm", id: dmId, name: authorDisplay });
+    }
+    const otherUid = getOtherUidFromChat({ type: "dm", id: dmId });
+    if (otherUid && otherUid !== S.uid) {
+      const pub = S.publicUsers?.[otherUid];
+      await ensureFriendshipFromOutgoing(otherUid, pub?.displayNameDisplay, pub?.photoURL);
     }
   });
   S.dmPreviewUnsubs[dmId] = () => off(msgQuery, "child_added", handler);
