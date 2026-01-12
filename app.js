@@ -2192,6 +2192,7 @@ function renderSignedOut() {
   if (staticWrap) staticWrap.classList.remove("staticWrapInApp");
   if (staticMenu) staticMenu.classList.remove("staticMenuInApp");
   if (staticSlideMenu) staticSlideMenu.classList.remove("staticSlideInApp");
+  if (staticWrap) staticWrap.style.display = "block";
   if (staticWrap && !document.body.contains(staticWrap)) document.body.appendChild(staticWrap);
 
   const screen = el("div", { class: "authScreen" });
@@ -2248,6 +2249,7 @@ function renderLoadingScreen() {
   if (staticWrap) staticWrap.classList.remove("staticWrapInApp");
   if (staticMenu) staticMenu.classList.remove("staticMenuInApp");
   if (staticSlideMenu) staticSlideMenu.classList.remove("staticSlideInApp");
+  if (staticWrap) staticWrap.style.display = "block";
   if (staticWrap && !document.body.contains(staticWrap)) document.body.appendChild(staticWrap);
 
   const screen = el("div", { class: "authScreen" });
@@ -2329,6 +2331,7 @@ function renderShell() {
     staticWrap.classList.remove("staticWrapInApp");
     if (staticSlideMenu) staticSlideMenu.classList.remove("staticSlideInApp");
     if (staticMenu) staticMenu.classList.remove("staticMenuInApp");
+    staticWrap.style.display = "none";
   }
 
   // CHAT PANE
@@ -2562,26 +2565,15 @@ async function sendFriendRequestByDisplayOrEmail(input) {
   if (targetUid === S.uid) throw new Error("You can’t add yourself.");
 
   const fSnap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/friends/${targetUid}`));
-  if (fSnap?.exists?.()) throw new Error("You are already friends.");
+  const fLegacy = fSnap?.exists?.() ? null : await safeGet(ref(db, `users/${S.uid}/friends/${targetUid}`));
+  if (fSnap?.exists?.() || fLegacy?.exists?.()) throw new Error("You are already friends.");
 
   const blockSnap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/blocks/${targetUid}`));
-  if (blockSnap?.exists?.()) throw new Error("You blocked this user.");
+  const blockLegacy = blockSnap?.exists?.() ? null : await safeGet(ref(db, `users/${S.uid}/blocks/${targetUid}`));
+  if (blockSnap?.exists?.() || blockLegacy?.exists?.()) throw new Error("You blocked this user.");
 
   const fromPhoto = S.profile?.photoURL || S.user?.photoURL || null;
   const targetPhoto = peopleSnap?.exists?.() ? (all?.[targetUid]?.public?.photoURL || null) : (all?.[targetUid]?.photoURL || null);
-  await update(ref(db, `${peoplePrivatePath(S.uid)}/friendRequestsOut/${targetUid}`), {
-    toUid: targetUid,
-    toDisplay: targetDisplay,
-    createdAt: nowMs(),
-    toPhoto: targetPhoto
-  });
-
-  await update(ref(db, `${peoplePrivatePath(targetUid)}/friendRequestsIn/${S.uid}`), {
-    fromUid: S.uid,
-    fromDisplay: S.profile.displayNameDisplay,
-    fromPhoto,
-    createdAt: nowMs()
-  });
   await update(ref(db, `users/${S.uid}/friendRequestsOut/${targetUid}`), {
     toUid: targetUid,
     toDisplay: targetDisplay,
@@ -2602,10 +2594,7 @@ async function sendFriendRequestByDisplayOrEmail(input) {
 
 async function declineFriendRequest(fromUid) {
   try {
-    await remove(ref(db, `${peoplePrivatePath(S.uid)}/friendRequestsIn/${fromUid}`));
-    await remove(ref(db, `${peoplePrivatePath(fromUid)}/friendRequestsOut/${S.uid}`));
     await remove(ref(db, `users/${S.uid}/friendRequestsIn/${fromUid}`)).catch(() => {});
-    await remove(ref(db, `users/${fromUid}/friendRequestsOut/${S.uid}`)).catch(() => {});
     await incrementStatCounter(S.uid, "friendRequestsDeclined", 1);
     await logStatEvent(S.uid, "friend-request-declined", { fromUid });
     showToast("Request declined.", "ok");
@@ -2620,30 +2609,22 @@ function deterministicDmId(a, b) {
 
 async function acceptFriendRequest(fromUid) {
   try {
-    const pub = await get(ref(db, peoplePublicPath(fromUid)));
-    const friendDisplay = pub.exists() ? (pub.val()?.displayNameDisplay || "Friend") : "Friend";
-    const friendPhoto = pub.exists() ? (pub.val()?.photoURL || null) : null;
+    const pub = await safeGet(ref(db, peoplePublicPath(fromUid)));
+    const legacyPub = pub?.exists?.() ? null : await safeGet(ref(db, `publicUsers/${fromUid}`));
+    const pubData = pub?.exists?.() ? pub.val() : (legacyPub?.val?.() || {});
+    const friendDisplay = pubData?.displayNameDisplay || "Friend";
+    const friendPhoto = pubData?.photoURL || null;
     const myDisplay = S.profile?.displayNameDisplay || "Friend";
     const myPhoto = S.user?.photoURL || null;
 
-    await update(ref(db, `${peoplePrivatePath(S.uid)}/friends/${fromUid}`), {
+    await update(ref(db, `users/${S.uid}/friends/${fromUid}`), {
       uid: fromUid,
       displayNameDisplay: friendDisplay,
       photoURL: friendPhoto,
       since: nowMs()
     });
 
-    await update(ref(db, `${peoplePrivatePath(fromUid)}/friends/${S.uid}`), {
-      uid: S.uid,
-      displayNameDisplay: myDisplay,
-      photoURL: myPhoto,
-      since: nowMs()
-    }).catch(() => {});
-
-    await remove(ref(db, `${peoplePrivatePath(S.uid)}/friendRequestsIn/${fromUid}`));
-    await remove(ref(db, `${peoplePrivatePath(fromUid)}/friendRequestsOut/${S.uid}`)).catch(() => {});
     await remove(ref(db, `users/${S.uid}/friendRequestsIn/${fromUid}`)).catch(() => {});
-    await remove(ref(db, `users/${fromUid}/friendRequestsOut/${S.uid}`)).catch(() => {});
 
     const dmId = deterministicDmId(S.uid, fromUid);
 
@@ -2659,15 +2640,6 @@ async function acceptFriendRequest(fromUid) {
     }).catch(() => {});
 
     await upsertMyChatRef("dm", dmId, friendDisplay, friendPhoto, nowMs());
-    await update(ref(db, `${peoplePrivatePath(fromUid)}/chatRefs/${scopeKey("dm", dmId)}`), {
-      type: "dm",
-      id: dmId,
-      name: myDisplay,
-      photoURL: myPhoto,
-      lastAt: nowMs(),
-      sub: "",
-      hidden: false
-    }).catch(() => {});
     await update(ref(db, `users/${fromUid}/chatRefs/${scopeKey("dm", dmId)}`), {
       type: "dm",
       id: dmId,
