@@ -205,6 +205,47 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     align-items:center;
     justify-content:center;
     padding: 24px;
+    position: relative;
+  }
+  .authTop{
+    position: absolute;
+    top: 18px;
+    left: 18px;
+    right: 18px;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    pointer-events:none;
+    z-index: 2;
+  }
+  .authTopLeft,
+  .authTopRight{
+    pointer-events:auto;
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .authThemeToggle{
+    display:inline-flex;
+    gap:6px;
+    padding:4px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    background: rgba(0,0,0,.18);
+  }
+  .authThemeBtn{
+    border: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 12px;
+    padding:6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    font-weight: 800;
+  }
+  .authThemeBtn.active{
+    background: rgba(106,167,255,.18);
+    color: var(--text);
   }
   .authCard{
     width: min(720px, 100%);
@@ -243,12 +284,19 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     align-items:center;
     gap:10px;
   }
+  .logoBtn{
+    display:inline-flex;
+    border:none;
+    background: transparent;
+    padding: 0;
+    cursor: pointer;
+  }
   .authLogo{
     width: 72px;
     height: 72px;
     border-radius: 18px;
-    border: 1px solid var(--border);
-    background: rgba(255,255,255,.08);
+    border: none;
+    background: transparent;
   }
   .authTitle{
     font-weight: 950;
@@ -263,24 +311,31 @@ document.title = `${APP_NAME} (${APP_SECONDARY_NAME}) | ${BRAND_NAME}`;
     display:inline-flex;
     align-items:center;
     justify-content:center;
-    border: 1px solid var(--border);
-    background: rgba(255,255,255,.08);
+    border: none;
+    background: transparent;
     border-radius: 16px;
     padding: 0;
     cursor:pointer;
-    box-shadow: 0 10px 20px rgba(0,0,0,.25);
-    width: 100%;
-    max-width: 320px;
+    box-shadow: none;
     overflow: hidden;
+  }
+  .googleBtn:focus-visible{
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
   }
   .googleBtn:disabled{
     opacity: .6;
     cursor:not-allowed;
   }
   .googleBtn img{
-    width: 100%;
+    width: 280px;
     height: auto;
     display:block;
+  }
+  .authActions{
+    display:flex;
+    align-items:center;
+    justify-content:center;
   }
   .authFooter{
     display:flex;
@@ -835,6 +890,7 @@ const S = {
   dingAudio: null,
   autoOpenInProgress: false,
   sessionId: null,
+  appReady: false,
 
   ui: {},
 
@@ -849,6 +905,7 @@ const S = {
    UTIL
 ---------------------------- */
 function nowMs() { return Date.now(); }
+const THEME_STORAGE_KEY = "chat-theme";
 
 function peoplePublicPath(uid) {
   return `${PEOPLE_ROOT}/${uid}/public`;
@@ -887,6 +944,14 @@ async function removePeoplePrivate(uid, childPath) {
   await remove(ref(db, `users/${uid}/${childPath}`)).catch(() => {});
 }
 
+async function safeGet(refPath) {
+  try {
+    return await get(refPath);
+  } catch {
+    return null;
+  }
+}
+
 async function logStatEvent(uid, type, data = {}) {
   if (!uid) return;
   const payload = { type, at: nowMs(), ...data };
@@ -921,6 +986,20 @@ async function startSessionTracking() {
 
 function normalizeDisplayName(name) {
   return String(name || "").trim().toLowerCase();
+}
+
+function getStoredTheme() {
+  try {
+    return localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function setStoredTheme(theme) {
+  try {
+    localStorage.setItem(THEME_STORAGE_KEY, theme);
+  } catch {}
 }
 
 function isReservedName(name) {
@@ -1516,6 +1595,7 @@ function openSignInModal() {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
       await signInWithPopup(auth, provider);
+      await handleSignedInUser(auth.currentUser);
       m.close();
     } catch (e) {
       const message = String(e?.message || "");
@@ -1561,15 +1641,16 @@ function getFriendlyAuthError(e) {
 async function ensureUserProfile(user) {
   const uid = user.uid;
   const privateRef = ref(db, peoplePrivatePath(uid));
-  const snap = await get(privateRef);
-  const legacySnap = snap.exists() ? null : await get(ref(db, `users/${uid}`));
-  const legacy = legacySnap?.exists() ? (legacySnap.val() || {}) : {};
-  const existing = snap.exists() ? (snap.val() || {}) : legacy;
+  const snap = await safeGet(privateRef);
+  const legacySnap = snap?.exists?.() ? null : await safeGet(ref(db, `users/${uid}`));
+  const legacy = legacySnap?.exists?.() ? (legacySnap.val() || {}) : {};
+  const existing = snap?.exists?.() ? (snap.val() || {}) : legacy;
 
   const basePrivate = {
     uid,
     email: user.email || legacy?.email || null,
     photoURL: user.photoURL || legacy?.photoURL || null,
+    displayName: legacy?.displayNameDisplay || null,
     displayNameDisplay: legacy?.displayNameDisplay || null,
     displayNameNormalized: legacy?.displayNameNormalized || null,
     theme: legacy?.theme || DEFAULT_THEME,
@@ -1595,7 +1676,7 @@ async function ensureUserProfile(user) {
     messagesSent: legacy?.messagesSent || 0
   };
 
-  if (!snap.exists()) {
+  if (!snap?.exists?.()) {
     await setPeoplePrivate(uid, basePrivate);
     const baseStats = {
       counters: {
@@ -1627,6 +1708,7 @@ async function ensureUserProfile(user) {
 
   const publicPayload = {
     uid,
+    displayName: existing.displayNameDisplay || null,
     displayNameDisplay: existing.displayNameDisplay || null,
     displayNameNormalized: existing.displayNameNormalized || null,
     photoURL: user.photoURL || existing.photoURL || null,
@@ -1649,10 +1731,10 @@ async function ensureUserProfile(user) {
 }
 
 async function loadProfile(uid) {
-  const peopleSnap = await get(ref(db, peoplePrivatePath(uid)));
-  if (peopleSnap.exists()) return peopleSnap.val();
-  const snap = await get(ref(db, `users/${uid}`));
-  return snap.exists() ? snap.val() : null;
+  const peopleSnap = await safeGet(ref(db, peoplePrivatePath(uid)));
+  if (peopleSnap?.exists?.()) return peopleSnap.val();
+  const snap = await safeGet(ref(db, `users/${uid}`));
+  return snap?.exists?.() ? snap.val() : null;
 }
 
 async function loadIsAdmin(uid) {
@@ -1668,20 +1750,30 @@ async function loadIsAdmin(uid) {
    DISPLAY NAME MODAL
 ---------------------------- */
 async function isDisplayNameTaken(normalized, myUid) {
-  const indexSnap = await get(ref(db, PEOPLE_DISPLAYNAMES));
-  if (indexSnap.exists()) {
+  const indexSnap = await safeGet(ref(db, PEOPLE_DISPLAYNAMES));
+  if (indexSnap?.exists?.()) {
     const owner = indexSnap.val()?.[normalized] || null;
     if (owner && owner !== myUid) return true;
   }
 
-  const legacyIndex = await get(ref(db, "displayNames"));
-  if (legacyIndex.exists()) {
+  const legacyIndex = await safeGet(ref(db, "displayNames"));
+  if (legacyIndex?.exists?.()) {
     const owner = legacyIndex.val()?.[normalized] || null;
     if (owner && owner !== myUid) return true;
   }
 
-  const snap = await get(ref(db, PEOPLE_ROOT));
-  if (!snap.exists()) return false;
+  const snap = await safeGet(ref(db, PEOPLE_ROOT));
+  if (!snap?.exists?.()) {
+    const legacyPublic = await safeGet(ref(db, "publicUsers"));
+    if (!legacyPublic?.exists?.()) return false;
+    const all = legacyPublic.val() || {};
+    for (const [uid, u] of Object.entries(all)) {
+      if (uid === myUid) continue;
+      const dn = normalizeDisplayName(u?.displayNameDisplay || "");
+      if (dn && dn === normalized) return true;
+    }
+    return false;
+  }
   const all = snap.val() || {};
   for (const [uid, u] of Object.entries(all)) {
     if (uid === myUid) continue;
@@ -1709,6 +1801,7 @@ async function applyDisplayName(nextName, previousName, reason) {
   };
 
   await updatePeoplePrivate(S.uid, {
+    displayName: raw,
     displayNameDisplay: raw,
     displayNameNormalized: normalized,
     nameHistory,
@@ -1722,6 +1815,7 @@ async function applyDisplayName(nextName, previousName, reason) {
 
   await updatePeoplePublic(S.uid, {
     uid: S.uid,
+    displayName: raw,
     displayNameDisplay: raw,
     displayNameNormalized: normalized,
     photoURL: S.user?.photoURL || null,
@@ -1918,6 +2012,7 @@ function applyTheme(theme) {
   );
   document.body.classList.add(`theme-${t}`);
   S.theme = t;
+  setStoredTheme(t);
 }
 
 async function saveThemeToCloud(theme) {
@@ -1928,11 +2023,45 @@ async function saveThemeToCloud(theme) {
   } catch {}
 }
 
+function buildAuthTopBar() {
+  const bar = el("div", { class: "authTop" });
+  const left = el("div", { class: "authTopLeft" });
+  const right = el("div", { class: "authTopRight" });
+
+  const toggle = el("div", { class: "authThemeToggle", role: "group", "aria-label": "Theme" });
+  const darkBtn = el("button", { class: "authThemeBtn", text: "Dark", type: "button" });
+  const lightBtn = el("button", { class: "authThemeBtn", text: "Light", type: "button" });
+
+  const updateActive = () => {
+    const mode = S.theme === "light" ? "light" : "dark";
+    darkBtn.classList.toggle("active", mode === "dark");
+    lightBtn.classList.toggle("active", mode === "light");
+  };
+
+  darkBtn.addEventListener("click", () => {
+    applyTheme("dark");
+    updateActive();
+  });
+  lightBtn.addEventListener("click", () => {
+    applyTheme("light");
+    updateActive();
+  });
+
+  updateActive();
+  toggle.appendChild(darkBtn);
+  toggle.appendChild(lightBtn);
+  right.appendChild(toggle);
+  bar.appendChild(left);
+  bar.appendChild(right);
+  return bar;
+}
+
 /* ---------------------------
    UI RENDER
 ---------------------------- */
 function renderSignedOut() {
   clear(root);
+  applyTheme(getStoredTheme() || DEFAULT_THEME);
   document.body.classList.add("auth-screen");
   const staticWrap = document.getElementById("staticWrap");
   const staticMenu = document.getElementById("staticMenu");
@@ -1943,13 +2072,14 @@ function renderSignedOut() {
   if (staticWrap && !document.body.contains(staticWrap)) document.body.appendChild(staticWrap);
 
   const screen = el("div", { class: "authScreen" });
+  screen.appendChild(buildAuthTopBar());
   const card = el("div", { class: "authCard authCardGlow" });
   const bannerLink = el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
     el("img", { class: "authBanner", src: BRAND_BANNER, alt: `${BRAND_NAME} banner` })
   ]);
 
   const brand = el("div", { class: "authBrand" }, [
-    el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
+    el("a", { class: "logoBtn", href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
       el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` })
     ]),
     el("div", { class: "authTitle", text: APP_NAME }),
@@ -1972,13 +2102,14 @@ function renderSignedOut() {
   const signInBtn = el("button", { class: "googleBtn", onclick: openSignInModal, "aria-label": "Sign in with Google" }, [
     el("img", { src: GOOGLE_SIGNIN_IMG, alt: "Sign in with Google" })
   ]);
+  const actions = el("div", { class: "authActions" }, [signInBtn]);
 
   const adSlot = el("div", { class: "adSlot" });
 
   card.appendChild(bannerLink);
   card.appendChild(brand);
   card.appendChild(copy);
-  card.appendChild(signInBtn);
+  card.appendChild(actions);
   card.appendChild(adSlot);
   screen.appendChild(card);
   root.appendChild(screen);
@@ -1986,6 +2117,7 @@ function renderSignedOut() {
 
 function renderLoadingScreen() {
   clear(root);
+  applyTheme(getStoredTheme() || DEFAULT_THEME);
   document.body.classList.add("auth-screen");
   const staticWrap = document.getElementById("staticWrap");
   const staticMenu = document.getElementById("staticMenu");
@@ -1996,13 +2128,14 @@ function renderLoadingScreen() {
   if (staticWrap && !document.body.contains(staticWrap)) document.body.appendChild(staticWrap);
 
   const screen = el("div", { class: "authScreen" });
+  screen.appendChild(buildAuthTopBar());
   const card = el("div", { class: "authCard authCardGlow" });
   const bannerLink = el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
     el("img", { class: "authBanner", src: BRAND_BANNER, alt: `${BRAND_NAME} banner` })
   ]);
 
   const brand = el("div", { class: "authBrand" }, [
-    el("a", { href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
+    el("a", { class: "logoBtn", href: BRAND_LINK, target: "_blank", rel: "noopener" }, [
       el("img", { class: "authLogo", src: BRAND_ICON, alt: `${APP_NAME} logo` })
     ]),
     el("div", { class: "authTitle", text: APP_NAME }),
@@ -2281,17 +2414,18 @@ async function sendFriendRequestByDisplayOrEmail(input) {
 
   const normalized = normalizeDisplayName(raw);
 
-  const peopleSnap = await get(ref(db, PEOPLE_ROOT));
-  if (!peopleSnap.exists()) throw new Error("No users found yet.");
-  const all = peopleSnap.val() || {};
+  const peopleSnap = await safeGet(ref(db, PEOPLE_ROOT));
+  const legacySnap = peopleSnap?.exists?.() ? null : await safeGet(ref(db, "publicUsers"));
+  const all = peopleSnap?.exists?.() ? (peopleSnap.val() || {}) : (legacySnap?.val?.() || {});
+  if (!Object.keys(all || {}).length) throw new Error("No users found yet.");
 
   let targetUid = null;
   let targetDisplay = null;
   for (const [uid, u] of Object.entries(all)) {
-    const dn = normalizeDisplayName(u?.public?.displayNameDisplay || "");
+    const dn = normalizeDisplayName(peopleSnap?.exists?.() ? (u?.public?.displayNameDisplay || "") : (u?.displayNameDisplay || ""));
     if (dn && dn === normalized) {
       targetUid = uid;
-      targetDisplay = u?.public?.displayNameDisplay || raw;
+      targetDisplay = peopleSnap?.exists?.() ? (u?.public?.displayNameDisplay || raw) : (u?.displayNameDisplay || raw);
       break;
     }
   }
@@ -2299,18 +2433,19 @@ async function sendFriendRequestByDisplayOrEmail(input) {
   if (!targetUid) throw new Error("User not found (display name).");
   if (targetUid === S.uid) throw new Error("You can’t add yourself.");
 
-  const fSnap = await get(ref(db, `${peoplePrivatePath(S.uid)}/friends/${targetUid}`));
-  if (fSnap.exists()) throw new Error("You are already friends.");
+  const fSnap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/friends/${targetUid}`));
+  if (fSnap?.exists?.()) throw new Error("You are already friends.");
 
-  const blockSnap = await get(ref(db, `${peoplePrivatePath(S.uid)}/blocks/${targetUid}`));
-  if (blockSnap.exists()) throw new Error("You blocked this user.");
+  const blockSnap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/blocks/${targetUid}`));
+  if (blockSnap?.exists?.()) throw new Error("You blocked this user.");
 
   const fromPhoto = S.profile?.photoURL || S.user?.photoURL || null;
+  const targetPhoto = peopleSnap?.exists?.() ? (all?.[targetUid]?.public?.photoURL || null) : (all?.[targetUid]?.photoURL || null);
   await update(ref(db, `${peoplePrivatePath(S.uid)}/friendRequestsOut/${targetUid}`), {
     toUid: targetUid,
     toDisplay: targetDisplay,
     createdAt: nowMs(),
-    toPhoto: all?.[targetUid]?.public?.photoURL || null
+    toPhoto: targetPhoto
   });
 
   await update(ref(db, `${peoplePrivatePath(targetUid)}/friendRequestsIn/${S.uid}`), {
@@ -2323,7 +2458,7 @@ async function sendFriendRequestByDisplayOrEmail(input) {
     toUid: targetUid,
     toDisplay: targetDisplay,
     createdAt: nowMs(),
-    toPhoto: all?.[targetUid]?.public?.photoURL || null
+    toPhoto: targetPhoto
   }).catch(() => {});
   await update(ref(db, `users/${targetUid}/friendRequestsIn/${S.uid}`), {
     fromUid: S.uid,
@@ -2480,23 +2615,23 @@ async function setLastRead(type, id, ts) {
 }
 
 async function loadMyChatState() {
-  const snap = await get(ref(db, `${peoplePrivatePath(S.uid)}/chatState`));
-  if (snap.exists()) {
+  const snap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/chatState`));
+  if (snap?.exists?.()) {
     S.chatState = snap.val() || {};
   } else {
-    const legacy = await get(ref(db, `users/${S.uid}/chatState`));
-    S.chatState = legacy.exists() ? (legacy.val() || {}) : {};
+    const legacy = await safeGet(ref(db, `users/${S.uid}/chatState`));
+    S.chatState = legacy?.exists?.() ? (legacy.val() || {}) : {};
   }
 }
 
 async function updateUnreadCounts() {
   if (!S.uid) return;
 
-  let chatRefsSnap = await get(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs`));
-  let refsObj = chatRefsSnap.exists() ? (chatRefsSnap.val() || {}) : {};
-  if (!chatRefsSnap.exists()) {
-    chatRefsSnap = await get(ref(db, `users/${S.uid}/chatRefs`));
-    refsObj = chatRefsSnap.exists() ? (chatRefsSnap.val() || {}) : {};
+  let chatRefsSnap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs`));
+  let refsObj = chatRefsSnap?.exists?.() ? (chatRefsSnap.val() || {}) : {};
+  if (!chatRefsSnap?.exists?.()) {
+    chatRefsSnap = await safeGet(ref(db, `users/${S.uid}/chatRefs`));
+    refsObj = chatRefsSnap?.exists?.() ? (chatRefsSnap.val() || {}) : {};
   }
   const refs = Object.values(refsObj);
 
@@ -2831,8 +2966,14 @@ async function getAuthorDisplay(uid) {
       S._nameCache[uid] = cached;
       return cached;
     }
-    const pub = await get(ref(db, peoplePublicPath(uid)));
-    const dn = pub.exists() ? (pub.val()?.displayNameDisplay || "User") : "User";
+    const pub = await safeGet(ref(db, peoplePublicPath(uid)));
+    if (pub?.exists?.()) {
+      const dn = pub.val()?.displayNameDisplay || "User";
+      S._nameCache[uid] = dn;
+      return dn;
+    }
+    const legacy = await safeGet(ref(db, `publicUsers/${uid}`));
+    const dn = legacy?.exists?.() ? (legacy.val()?.displayNameDisplay || "User") : "User";
     S._nameCache[uid] = dn;
     return dn;
   } catch {
@@ -3711,10 +3852,10 @@ function svgUserPlus() { return el("span", { html: `<svg width="18" height="18" 
    REFRESH (friends/requests/chats) + AUTH BOOT
 ---------------------------- */
 async function refreshFriendsAndRequests() {
-  const uSnap = await get(ref(db, `${peoplePrivatePath(S.uid)}`));
-  if (!uSnap.exists()) {
-    const legacy = await get(ref(db, `users/${S.uid}`));
-    if (!legacy.exists()) return;
+  const uSnap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}`));
+  if (!uSnap?.exists?.()) {
+    const legacy = await safeGet(ref(db, `users/${S.uid}`));
+    if (!legacy?.exists?.()) return;
     S.profile = legacy.val() || {};
   } else {
     S.profile = uSnap.val() || {};
@@ -3779,11 +3920,11 @@ function hydrateChatRefs(refsObj = {}) {
 }
 
 async function refreshChats() {
-  let snap = await get(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs`));
-  let refsObj = snap.exists() ? (snap.val() || {}) : {};
-  if (!snap.exists()) {
-    snap = await get(ref(db, `users/${S.uid}/chatRefs`));
-    refsObj = snap.exists() ? (snap.val() || {}) : {};
+  let snap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs`));
+  let refsObj = snap?.exists?.() ? (snap.val() || {}) : {};
+  if (!snap?.exists?.()) {
+    snap = await safeGet(ref(db, `users/${S.uid}/chatRefs`));
+    refsObj = snap?.exists?.() ? (snap.val() || {}) : {};
   }
   hydrateChatRefs(refsObj);
   if (!S.active && S.chats.length === 0) {
@@ -3906,6 +4047,12 @@ function subscribePublicUsers() {
     }
     renderFriendsModalLists();
     renderChatList();
+  }, () => {
+    get(ref(db, "publicUsers")).then((legacy) => {
+      S.publicUsers = legacy.exists() ? (legacy.val() || {}) : {};
+      renderFriendsModalLists();
+      renderChatList();
+    }).catch(() => {});
   });
   S.publicUsersUnsub = () => off(refPath, "value", handler);
 }
@@ -4107,6 +4254,51 @@ async function handleRedirectResult() {
 
 handleRedirectResult().catch(() => {});
 
+async function handleSignedInUser(user) {
+  if (!user) return;
+  if (S.appReady && S.uid === user.uid) return;
+  S.user = user;
+  S.uid = user.uid;
+
+  await ensureUserProfile(user);
+  S.profile = await loadProfile(S.uid);
+  S.isAdmin = await loadIsAdmin(S.uid);
+
+  if (!S.profile?.displayNameDisplay) {
+    applyTheme(getStoredTheme() || DEFAULT_THEME);
+    renderShell();
+    openDisplayNameModal(user);
+    await refreshAll();
+    S.appReady = true;
+    return;
+  }
+
+  applyTheme(S.profile?.theme || getStoredTheme() || DEFAULT_THEME);
+  renderShell();
+
+  subscribeUserData();
+  subscribeChatRefs();
+  subscribePublicUsers();
+  subscribeMyDms();
+  await refreshAll();
+
+  // Keep lastSeen updated sometimes
+  setInterval(() => {
+    if (!S.uid) return;
+    setPresenceStatus(S.presenceStatus || "online", { updateLastSeen: true }).catch(() => {});
+  }, 25000);
+
+  startPresenceTracking();
+
+  // when window returns focus, mark active as read
+  window.addEventListener("focus", () => { markActiveReadNow().catch(() => {}); });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) markActiveReadNow().catch(() => {});
+  });
+
+  S.appReady = true;
+}
+
 onAuthStateChanged(auth, async (user) => {
   try {
     if (!user) {
@@ -4128,48 +4320,13 @@ onAuthStateChanged(auth, async (user) => {
       if (S.dmListUnsub) { try { S.dmListUnsub(); } catch {} S.dmListUnsub = null; }
       Object.values(S.dmPreviewUnsubs || {}).forEach((unsub) => { try { unsub(); } catch {} });
       S.dmPreviewUnsubs = {};
-      applyTheme(DEFAULT_THEME);
+      S.appReady = false;
+      applyTheme(getStoredTheme() || DEFAULT_THEME);
       renderSignedOut();
       return;
     }
 
-    S.user = user;
-    S.uid = user.uid;
-
-    await ensureUserProfile(user);
-    S.profile = await loadProfile(S.uid);
-    S.isAdmin = await loadIsAdmin(S.uid);
-
-    if (!S.profile?.displayNameDisplay) {
-      applyTheme(DEFAULT_THEME);
-      renderShell();
-      openDisplayNameModal(user);
-      await refreshAll();
-      return;
-    }
-
-    applyTheme(S.profile?.theme || DEFAULT_THEME);
-    renderShell();
-
-    subscribeUserData();
-    subscribeChatRefs();
-    subscribePublicUsers();
-    subscribeMyDms();
-    await refreshAll();
-
-    // Keep lastSeen updated sometimes
-    setInterval(() => {
-      if (!S.uid) return;
-      setPresenceStatus(S.presenceStatus || "online", { updateLastSeen: true }).catch(() => {});
-    }, 25000);
-
-    startPresenceTracking();
-
-    // when window returns focus, mark active as read
-    window.addEventListener("focus", () => { markActiveReadNow().catch(() => {}); });
-    document.addEventListener("visibilitychange", () => {
-      if (!document.hidden) markActiveReadNow().catch(() => {});
-    });
+    await handleSignedInUser(user);
   } catch {
     showToast("App init failed.", "error");
     renderSignedOut();
