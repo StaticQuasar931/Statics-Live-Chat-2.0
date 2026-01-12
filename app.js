@@ -891,6 +891,7 @@ const S = {
   autoOpenInProgress: false,
   sessionId: null,
   appReady: false,
+  peopleWriteEnabled: true,
 
   ui: {},
 
@@ -920,27 +921,67 @@ function peopleStatsPath(uid) {
 }
 
 async function updatePeoplePublic(uid, data) {
-  await update(ref(db, peoplePublicPath(uid)), data).catch(() => {});
+  if (S.peopleWriteEnabled) {
+    try {
+      await update(ref(db, peoplePublicPath(uid)), data);
+    } catch (err) {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    }
+  }
   await update(ref(db, `publicUsers/${uid}`), data).catch(() => {});
 }
 
 async function updatePeoplePrivate(uid, data) {
-  await update(ref(db, peoplePrivatePath(uid)), data).catch(() => {});
+  if (S.peopleWriteEnabled) {
+    try {
+      await update(ref(db, peoplePrivatePath(uid)), data);
+    } catch (err) {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    }
+  }
   await update(ref(db, `users/${uid}`), data).catch(() => {});
 }
 
 async function setPeoplePublic(uid, data) {
-  await set(ref(db, peoplePublicPath(uid)), data).catch(() => {});
+  if (S.peopleWriteEnabled) {
+    try {
+      await set(ref(db, peoplePublicPath(uid)), data);
+    } catch (err) {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    }
+  }
   await set(ref(db, `publicUsers/${uid}`), data).catch(() => {});
 }
 
 async function setPeoplePrivate(uid, data) {
-  await set(ref(db, peoplePrivatePath(uid)), data).catch(() => {});
+  if (S.peopleWriteEnabled) {
+    try {
+      await set(ref(db, peoplePrivatePath(uid)), data);
+    } catch (err) {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    }
+  }
   await set(ref(db, `users/${uid}`), data).catch(() => {});
 }
 
 async function removePeoplePrivate(uid, childPath) {
-  await remove(ref(db, `${peoplePrivatePath(uid)}/${childPath}`)).catch(() => {});
+  if (S.peopleWriteEnabled) {
+    try {
+      await remove(ref(db, `${peoplePrivatePath(uid)}/${childPath}`));
+    } catch (err) {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    }
+  }
   await remove(ref(db, `users/${uid}/${childPath}`)).catch(() => {});
 }
 
@@ -955,7 +996,15 @@ async function safeGet(refPath) {
 async function logStatEvent(uid, type, data = {}) {
   if (!uid) return;
   const payload = { type, at: nowMs(), ...data };
-  await push(ref(db, `${peopleStatsPath(uid)}/events`), payload).catch(() => {});
+  if (S.peopleWriteEnabled) {
+    try {
+      await push(ref(db, `${peopleStatsPath(uid)}/events`), payload);
+    } catch (err) {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    }
+  }
   await push(ref(db, `users/${uid}/stats/events`), payload).catch(() => {});
 }
 
@@ -963,7 +1012,15 @@ async function incrementStatCounter(uid, key, delta = 1) {
   if (!uid) return;
   const peopleRef = ref(db, `${peopleStatsPath(uid)}/counters/${key}`);
   const legacyRef = ref(db, `users/${uid}/stats/counters/${key}`);
-  await runTransaction(peopleRef, (value) => (value || 0) + delta).catch(() => {});
+  if (S.peopleWriteEnabled) {
+    try {
+      await runTransaction(peopleRef, (value) => (value || 0) + delta);
+    } catch (err) {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    }
+  }
   await runTransaction(legacyRef, (value) => (value || 0) + delta).catch(() => {});
 }
 
@@ -978,9 +1035,19 @@ async function startSessionTracking() {
   const payload = { startedAt: nowMs(), endedAt: null };
   const peopleRef = ref(db, `${peopleStatsPath(S.uid)}/sessions/${sessionId}`);
   const legacyRef = ref(db, `users/${S.uid}/stats/sessions/${sessionId}`);
-  await set(peopleRef, payload).catch(() => {});
+  if (S.peopleWriteEnabled) {
+    try {
+      await set(peopleRef, payload);
+    } catch (err) {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    }
+  }
   await set(legacyRef, payload).catch(() => {});
-  onDisconnect(peopleRef).update({ endedAt: nowMs() }).catch(() => {});
+  if (S.peopleWriteEnabled) {
+    onDisconnect(peopleRef).update({ endedAt: nowMs() }).catch(() => {});
+  }
   onDisconnect(legacyRef).update({ endedAt: nowMs() }).catch(() => {});
 }
 
@@ -1689,7 +1756,13 @@ async function ensureUserProfile(user) {
       },
       sessions: {}
     };
-    await set(ref(db, peopleStatsPath(uid)), baseStats).catch(() => {});
+    if (S.peopleWriteEnabled) {
+      await set(ref(db, peopleStatsPath(uid)), baseStats).catch((err) => {
+        if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+          S.peopleWriteEnabled = false;
+        }
+      });
+    }
     await set(ref(db, `users/${uid}/stats`), baseStats).catch(() => {});
   } else {
     await updatePeoplePrivate(uid, {
@@ -1827,10 +1900,22 @@ async function applyDisplayName(nextName, previousName, reason) {
 
   if (previousNormalized && previousNormalized !== normalized) {
     await remove(ref(db, `displayNames/${previousNormalized}`)).catch(() => {});
-    await remove(ref(db, `${PEOPLE_DISPLAYNAMES}/${previousNormalized}`)).catch(() => {});
+    if (S.peopleWriteEnabled) {
+      await remove(ref(db, `${PEOPLE_DISPLAYNAMES}/${previousNormalized}`)).catch((err) => {
+        if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+          S.peopleWriteEnabled = false;
+        }
+      });
+    }
   }
   await set(ref(db, `displayNames/${normalized}`), S.uid);
-  await set(ref(db, `${PEOPLE_DISPLAYNAMES}/${normalized}`), S.uid);
+  if (S.peopleWriteEnabled) {
+    await set(ref(db, `${PEOPLE_DISPLAYNAMES}/${normalized}`), S.uid).catch((err) => {
+      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+        S.peopleWriteEnabled = false;
+      }
+    });
+  }
   return true;
 }
 
@@ -2197,10 +2282,9 @@ function renderShell() {
   const staticMenu = document.getElementById("staticMenu");
   const staticSlideMenu = document.getElementById("staticSlideMenu");
   if (staticWrap) {
-    staticWrap.classList.add("staticWrapInApp");
-    if (staticSlideMenu) staticSlideMenu.classList.add("staticSlideInApp");
-    if (staticMenu) staticMenu.classList.add("staticMenuInApp");
-    sidebar.appendChild(staticWrap);
+    staticWrap.classList.remove("staticWrapInApp");
+    if (staticSlideMenu) staticSlideMenu.classList.remove("staticSlideInApp");
+    if (staticMenu) staticMenu.classList.remove("staticMenuInApp");
   }
 
   // CHAT PANE
@@ -3975,6 +4059,21 @@ function subscribeUserData() {
       renderFriendRequests();
       renderFriendsModalLists();
     }).catch(() => {});
+  }, () => {
+    const legacyRef = ref(db, `users/${S.uid}`);
+    const legacyHandler = onValue(legacyRef, (legacySnap) => {
+      if (!legacySnap.exists()) return;
+      const u = legacySnap.val() || {};
+      S.profile = u;
+      if (S.ui?.meName) S.ui.meName.textContent = S.profile?.displayNameDisplay || "User";
+      S.friendRequestsIn = u.friendRequestsIn || {};
+      S.friends = u.friends || {};
+      if (u.chatState) S.chatState = u.chatState;
+      syncFriendProfiles().catch(() => {});
+      renderFriendRequests();
+      renderFriendsModalLists();
+    });
+    S.userDataUnsub = () => off(legacyRef, "value", legacyHandler);
   });
   S.userDataUnsub = () => off(userRef, "value", handler);
 }
@@ -3992,6 +4091,13 @@ function subscribeChatRefs() {
         hydrateChatRefs(legacyRefs);
       }).catch(() => {});
     }
+  }, () => {
+    const legacyRef = ref(db, `users/${S.uid}/chatRefs`);
+    const legacyHandler = onValue(legacyRef, (legacySnap) => {
+      const legacyRefs = legacySnap.exists() ? (legacySnap.val() || {}) : {};
+      hydrateChatRefs(legacyRefs);
+    });
+    S.chatRefsUnsub = () => off(legacyRef, "value", legacyHandler);
   });
   S.chatRefsUnsub = () => off(refPath, "value", handler);
 }
