@@ -4073,6 +4073,7 @@ async function refreshFriendsAndRequests() {
   renderFriendRequests();
   renderOutgoingRequests();
   renderFriendsModalLists();
+  await pruneOutgoingRequests().catch(() => {});
 }
 
 async function syncFriendProfiles() {
