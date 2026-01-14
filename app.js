@@ -3267,11 +3267,36 @@ async function openChat(chat) {
   renderChatList();
 }
 
+async function ensureDmRecordExists(dmId) {
+  if (!dmId) return;
+  const parts = String(dmId).split("_");
+  const other = parts.find((p) => p && p !== S.uid) || null;
+  if (!other) return;
+  try {
+    const dmRef = ref(db, `dms/${dmId}`);
+    const dmSnap = await get(dmRef);
+    if (!dmSnap.exists()) {
+      await set(dmRef, {
+        createdAt: nowMs(),
+        memberIds: { [S.uid]: true, [other]: true }
+      });
+      return;
+    }
+    const dmData = dmSnap.val() || {};
+    if (!dmData.memberIds || !dmData.memberIds[S.uid] || !dmData.memberIds[other]) {
+      await update(dmRef, {
+        memberIds: { ...(dmData.memberIds || {}), [S.uid]: true, [other]: true }
+      });
+    }
+  } catch {}
+}
+
 async function ensureDmChatRefExists(chat) {
   const parts = String(chat.id).split("_");
   const other = parts.find(p => p !== S.uid) || null;
 
   if (!other) return;
+  await ensureDmRecordExists(chat.id);
 
   const pub = await get(ref(db, peoplePublicPath(other)));
   const friendDisplay = pub.exists() ? (pub.val()?.displayNameDisplay || "Friend") : "Friend";
@@ -3289,6 +3314,7 @@ async function ensureDmChatRefForIncoming(dmId, lastAt, content) {
   const parts = String(dmId).split("_");
   const other = parts.find((p) => p !== S.uid) || null;
   if (!other) return;
+  await ensureDmRecordExists(dmId);
   const pub = await get(ref(db, peoplePublicPath(other)));
   const friendDisplay = pub.exists() ? (pub.val()?.displayNameDisplay || "Friend") : "Friend";
   const friendPhoto = pub.exists() ? (pub.val()?.photoURL || null) : null;
@@ -4125,9 +4151,12 @@ function hydrateChatRefs(refsObj = {}) {
 async function refreshChats() {
   let snap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs`));
   let refsObj = snap?.exists?.() ? (snap.val() || {}) : {};
-  if (!snap?.exists?.()) {
-    snap = await safeGet(ref(db, `users/${S.uid}/chatRefs`));
-    refsObj = snap?.exists?.() ? (snap.val() || {}) : {};
+  if (!snap?.exists?.() || Object.keys(refsObj).length === 0) {
+    const legacy = await safeGet(ref(db, `users/${S.uid}/chatRefs`));
+    const legacyRefs = legacy?.exists?.() ? (legacy.val() || {}) : {};
+    if (!snap?.exists?.() || Object.keys(refsObj).length === 0) {
+      refsObj = Object.keys(legacyRefs).length ? legacyRefs : refsObj;
+    }
   }
   hydrateChatRefs(refsObj);
   if (!S.active && S.chats.length === 0) {
@@ -4209,12 +4238,16 @@ function subscribeChatRefs() {
   const refPath = ref(db, `${peoplePrivatePath(S.uid)}/chatRefs`);
   const handler = onValue(refPath, (snap) => {
     const refsObj = snap.exists() ? (snap.val() || {}) : {};
-    if (snap.exists()) {
+    if (snap.exists() && Object.keys(refsObj).length > 0) {
       hydrateChatRefs(refsObj);
     } else {
       get(ref(db, `users/${S.uid}/chatRefs`)).then((legacy) => {
         const legacyRefs = legacy.exists() ? (legacy.val() || {}) : {};
-        hydrateChatRefs(legacyRefs);
+        if (Object.keys(legacyRefs).length > 0) {
+          hydrateChatRefs(legacyRefs);
+        } else {
+          hydrateChatRefs(refsObj);
+        }
       }).catch(() => {});
     }
   }, () => {
