@@ -32,6 +32,7 @@ import {
 } from "https://www.gstatic.com/firebasejs/11.5.0/firebase-database.js";
 import NAME_BLOCKLIST from "./name-blocklist.js";
 import { createCommandHandler } from "./commands.js";
+import { initMessaging } from "./text.js";
 
 /* ---------------------------
    CONFIG
@@ -1806,23 +1807,6 @@ function renderShell() {
   );
 }
 
-function renderSystemMessage(text, replaceAll = false) {
-  if (!S.ui?.messages) return;
-  if (replaceAll) clear(S.ui.messages);
-
-  const row = el("div", { class: "msgRow system" });
-  const bubble = el("div", { class: "msgBubble" }, [
-    el("div", { html: linkifyAndEmoji(escapeHtml(text)) }),
-    el("div", { class: "msgMeta" }, [
-      el("span", { class: "msgAuthor", text: APP_NAME }),
-      el("span", { class: "msgCode", text: formatTime(nowMs()) })
-    ])
-  ]);
-
-  row.appendChild(bubble);
-  S.ui.messages.appendChild(row);
-}
-
 /* ---------------------------
    FRIEND REQUESTS + FRIENDS
 ---------------------------- */
@@ -2290,188 +2274,6 @@ async function kickGroupMember(groupId, memberUid) {
   }
 }
 
-/* ---------------------------
-   MESSAGES + LISTENERS
----------------------------- */
-function clearChatListeners() {
-  if (S.msgChildAddedUnsub) { try { S.msgChildAddedUnsub(); } catch {} S.msgChildAddedUnsub = null; }
-  if (S.typingUnsub) { try { S.typingUnsub(); } catch {} S.typingUnsub = null; }
-  for (const u of S.presenceUnsubs) { try { u(); } catch {} }
-  S.presenceUnsubs = [];
-  for (const u of S.reactionUnsubs) { try { u(); } catch {} }
-  S.reactionUnsubs = [];
-}
-
-function linkifyAndEmoji(htmlAlreadyEscaped) {
-  const urlRe = /(https?:\/\/[^\s<]+)/g;
-  return htmlAlreadyEscaped.replace(urlRe, (u) => {
-    const clean = u.replace(/["')\]]+$/g, "");
-    const isImg = /\.(png|jpg|jpeg|gif|webp)$/i.test(clean);
-    const link = `<a href="${clean}" target="_blank" rel="noopener">${clean}</a>`;
-    if (isImg) return `${link}<br/><img class="msgImg" src="${clean}" alt="image" loading="lazy" />`;
-    return link;
-  });
-}
-
-function renderMessageContent(text) {
-  let safe = escapeHtml(String(text || "").slice(0, MAX_MESSAGE_CHARS));
-
-  safe = safe.replace(/:([a-z0-9_]+):/gi, (m, name) => {
-    const key = `:${name.toLowerCase()}:`;
-    if (key === ":static:") {
-      return `<img src="${STATIC_EMOJI_URL}" alt=":static:" class="staticEmoji" />`;
-    }
-    return SHORTCODES[key] ? escapeHtml(SHORTCODES[key]) : m;
-  });
-
-  safe = safe.replace(/\bStatic\b/gi, (match, offset, full) => {
-    const before = full[offset - 1];
-    const after = full[offset + match.length];
-    if (before === ":" || after === ":") return match;
-    return `<a href="${BRAND_LINK}" target="_blank" rel="noopener">Static</a>`;
-  });
-  safe = safe.replace(/\bGTA\b/gi, (match, offset, full) => {
-    const before = full[offset - 1];
-    const after = full[offset + match.length];
-    if (before === ":" || after === ":") return match;
-    return `<a href="https://sites.google.com/view/staticquasar931/gm3z/vice-city-grand-theft-auto?utm_source=livechatting2" target="_blank" rel="noopener">GTA</a>`;
-  });
-
-  safe = linkifyAndEmoji(safe);
-  safe = safe.replaceAll("\n", "<br/>");
-  return safe;
-}
-
-function playMessageDing() {
-  if (S.profile?.settings?.messageSounds === false) return;
-  if (!S.dingAudio) {
-    S.dingAudio = new Audio(MESSAGE_DING_URL);
-    S.dingAudio.volume = 0.6;
-  }
-  S.dingAudio.currentTime = 0;
-  S.dingAudio.play().catch(() => {});
-}
-
-function getEmojiOnlyState(text) {
-  const raw = String(text || "").trim();
-  if (!raw) return { emojiOnly: false, emojiCount: 0 };
-  const normalized = raw.replace(/:([a-z0-9_]+):/gi, (m, name) => {
-    const key = `:${name.toLowerCase()}:`;
-    if (key === ":static:") return "🧩";
-    return SHORTCODES[key] || "";
-  });
-  const compact = normalized.replace(/\s+/g, "");
-  const matches = compact.match(/\p{Extended_Pictographic}/gu) || [];
-  const nonEmoji = compact.replace(/\p{Extended_Pictographic}/gu, "");
-  if (nonEmoji.length > 0) return { emojiOnly: false, emojiCount: matches.length };
-  return { emojiOnly: matches.length > 0, emojiCount: matches.length };
-}
-
-function reactionBasePath(scopeType, scopeId, msgKey) {
-  const base = scopeType === "dm" ? "dmMessages" : "groupDmMessages";
-  return `${base}/${scopeId}/${msgKey}/reactions`;
-}
-
-async function toggleReaction(scopeType, scopeId, msgKey, emoji) {
-  if (!S.uid) return;
-  const reactionRef = ref(db, `${reactionBasePath(scopeType, scopeId, msgKey)}/${emoji}/${S.uid}`);
-  try {
-    const snap = await get(reactionRef);
-    if (snap.exists()) await remove(reactionRef);
-    else await set(reactionRef, true);
-  } catch {}
-}
-
-function subscribeReactions(scopeType, scopeId, msgKey, summaryNode, buttonMap) {
-  const rRef = ref(db, reactionBasePath(scopeType, scopeId, msgKey));
-  const handler = onValue(rRef, (snap) => {
-    const data = snap.val() || {};
-    const totals = {};
-    const myReactions = new Set();
-
-    for (const [emoji, users] of Object.entries(data)) {
-      const count = users ? Object.keys(users).length : 0;
-      if (count > 0) totals[emoji] = count;
-      if (users && users[S.uid]) myReactions.add(emoji);
-    }
-
-    summaryNode.innerHTML = "";
-    Object.entries(totals).forEach(([emoji, count]) => {
-      summaryNode.appendChild(el("div", { class: "reactionChip" }, [`${emoji} ${count}`]));
-    });
-
-    buttonMap.forEach((btn, emoji) => {
-      btn.classList.toggle("active", myReactions.has(emoji));
-    });
-  });
-
-  S.reactionUnsubs.push(() => off(rRef, "value", handler));
-}
-
-function addMessageToUI(msg) {
-  const messages = S.ui.messages;
-  if (!messages) return;
-
-  const isMe = msg.authorId === S.uid;
-  const isSystem = String(msg.content || "").startsWith("🧩");
-  const isDm = msg.scopeType === "dm";
-  const emojiState = getEmojiOnlyState(msg.content);
-  const isSingleEmoji = emojiState.emojiOnly && emojiState.emojiCount === 1;
-  const row = el("div", { class: `msgRow ${isSystem ? "system" : (isMe ? "me" : "")}` });
-
-  const authorDisplay = msg.authorDisplay || "User";
-  const timeText = formatTime(msg.createdAt || nowMs());
-  const content = el("div", {
-    class: `msgContent${isSingleEmoji ? " emojiOnly" : ""}`,
-    html: renderMessageContent(msg.content || "")
-  });
-  const meta = el("div", { class: "msgMeta" }, isDm ? [
-    el("span", { class: "msgCode", text: timeText })
-  ] : [
-    el("span", { class: "msgAuthor", text: authorDisplay }),
-    el("span", { class: "msgCode", text: timeText })
-  ]);
-
-  const bubble = el("div", { class: "msgBubble" }, [content, meta]);
-  bubble.title = `${authorDisplay} • ${timeText}`;
-
-  if (msg.scopeType && msg.scopeId && msg.msgKey) {
-    const actions = el("div", { class: "msgActions" });
-    const summary = el("div", { class: "reactionSummary" });
-    const btnMap = new Map();
-
-    REACTION_EMOJIS.forEach((emoji) => {
-      const btn = el("button", { class: "reactionBtn", text: emoji });
-      btn.addEventListener("click", () => toggleReaction(msg.scopeType, msg.scopeId, msg.msgKey, emoji));
-      btnMap.set(emoji, btn);
-      actions.appendChild(btn);
-    });
-
-    let lastTap = 0;
-    bubble.addEventListener("touchend", () => {
-      const now = Date.now();
-      if (now - lastTap < 300) {
-        toggleReaction(msg.scopeType, msg.scopeId, msg.msgKey, QUICK_REACTION);
-        lastTap = 0;
-      } else {
-        lastTap = now;
-      }
-    });
-    bubble.addEventListener("dblclick", () => {
-      toggleReaction(msg.scopeType, msg.scopeId, msg.msgKey, QUICK_REACTION);
-    });
-
-    bubble.appendChild(actions);
-    bubble.appendChild(summary);
-    subscribeReactions(msg.scopeType, msg.scopeId, msg.msgKey, summary, btnMap);
-  }
-
-  row.appendChild(bubble);
-  messages.appendChild(row);
-
-  messages.scrollTop = messages.scrollHeight;
-}
-
 async function getAuthorDisplay(uid) {
   if (!uid) return "User";
   if (uid === S.uid) return S.profile?.displayNameDisplay || "You";
@@ -2495,29 +2297,6 @@ async function getAuthorDisplay(uid) {
   } catch {
     return "User";
   }
-}
-
-function subscribeTyping(scopeType, scopeId) {
-  const tRef = ref(db, `typing/${scopeType}/${scopeId}`);
-  const handler = onValue(tRef, async (snap) => {
-    const v = snap.val() || {};
-    const typers = [];
-    for (const [uid, info] of Object.entries(v)) {
-      if (uid === S.uid) continue;
-      if (info?.typing === true) typers.push(await getAuthorDisplay(uid));
-    }
-    if (!typers.length) S.ui.typingLine.textContent = "";
-    else if (typers.length === 1) S.ui.typingLine.textContent = `${typers[0]} is typing...`;
-    else S.ui.typingLine.textContent = `${typers.slice(0, 3).join(", ")} are typing...`;
-  });
-  S.typingUnsub = () => off(tRef, "value", handler);
-}
-
-async function setMyTyping(isTyping) {
-  if (!S.active) return;
-  const scopeType = S.active.type === "dm" ? "dm" : "group";
-  const tRef = ref(db, `typing/${scopeType}/${S.active.id}/${S.uid}`);
-  await set(tRef, { typing: !!isTyping, at: nowMs() }).catch(() => {});
 }
 
 async function openChat(chat) {
@@ -2576,28 +2355,6 @@ async function openChat(chat) {
   renderChatList();
 }
 
-async function ensureDmRecordExists(dmId) {
-  if (!dmId) return;
-  const parts = String(dmId).split("_");
-  const other = parts.find((p) => p && p !== S.uid) || null;
-  if (!other) return;
-  const dmRef = ref(db, `dms/${dmId}`);
-  const dmSnap = await safeGet(dmRef);
-  if (!dmSnap?.exists?.()) {
-    await set(dmRef, {
-      createdAt: nowMs(),
-      memberIds: { [S.uid]: true, [other]: true }
-    }).catch(() => {});
-    return;
-  }
-  const dmData = dmSnap.val() || {};
-  if (!dmData.memberIds || !dmData.memberIds[S.uid] || !dmData.memberIds[other]) {
-    await update(dmRef, {
-      memberIds: { ...(dmData.memberIds || {}), [S.uid]: true, [other]: true }
-    }).catch(() => {});
-  }
-}
-
 async function ensureDmChatRefExists(chat) {
   const parts = String(chat.id).split("_");
   const other = parts.find(p => p !== S.uid) || null;
@@ -2635,214 +2392,6 @@ async function ensureGroupChatRefForIncoming(groupId, lastAt, content) {
   await upsertMyChatRef("group", groupId, name, null, lastAt, (content || "").slice(0, 90));
 }
 
-async function subscribeMessagesDm(dmId) {
-  const msgRef = ref(db, `dmMessages/${dmId}`);
-  const q = query(msgRef, orderByChild("createdAt"), limitToLast(LOAD_LAST_N));
-
-  const sk = scopeKey("dm", dmId);
-
-  const handler = onChildAdded(q, async (snap) => {
-    const msgKey = snap.key;
-    if (!msgKey) return;
-    if (S._seenMsgKeys[sk]?.has(msgKey)) return;
-    S._seenMsgKeys[sk].add(msgKey);
-
-    const v = snap.val();
-    if (!v) return;
-
-    const authorDisplay = await getAuthorDisplay(v.authorId);
-    const hadChat = (S.chats || []).some((c) => c.type === "dm" && c.id === dmId);
-    await ensureDmChatRefForIncoming(dmId, v.createdAt || nowMs(), v.content || "");
-    addMessageToUI({
-      authorId: v.authorId,
-      authorDisplay,
-      content: v.content || "",
-      createdAt: v.createdAt || nowMs(),
-      scopeType: "dm",
-      scopeId: dmId,
-      msgKey
-    });
-    if (v.authorId && v.authorId !== S.uid) {
-      playMessageDing();
-    }
-
-    await updateMyChatRef(sk, {
-      lastAt: v.createdAt || nowMs(),
-      sub: (v.content || "").slice(0, 90)
-    });
-
-    if (!hadChat && v.authorId && v.authorId !== S.uid) {
-      await refreshChats();
-      const otherDisplay = v.authorId === S.uid ? S.profile?.displayNameDisplay : authorDisplay;
-      await openChat({ type: "dm", id: dmId, name: otherDisplay });
-    }
-
-    if (!(S.active?.type === "dm" && S.active?.id === dmId && S.isWindowFocused)) {
-      await updateUnreadCounts();
-    } else {
-      await markActiveReadNow();
-    }
-  });
-
-  S.msgChildAddedUnsub = () => off(q, "child_added", handler);
-}
-
-async function subscribeMessagesGroup(groupId) {
-  const msgRef = ref(db, `groupDmMessages/${groupId}`);
-  const q = query(msgRef, orderByChild("createdAt"), limitToLast(LOAD_LAST_N));
-
-  const sk = scopeKey("group", groupId);
-
-  const handler = onChildAdded(q, async (snap) => {
-    const msgKey = snap.key;
-    if (!msgKey) return;
-    if (S._seenMsgKeys[sk]?.has(msgKey)) return;
-    S._seenMsgKeys[sk].add(msgKey);
-
-    const v = snap.val();
-    if (!v) return;
-
-    const authorDisplay = await getAuthorDisplay(v.authorId);
-    await ensureGroupChatRefForIncoming(groupId, v.createdAt || nowMs(), v.content || "");
-    addMessageToUI({
-      authorId: v.authorId,
-      authorDisplay,
-      content: v.content || "",
-      createdAt: v.createdAt || nowMs(),
-      scopeType: "group",
-      scopeId: groupId,
-      msgKey
-    });
-    if (v.authorId && v.authorId !== S.uid) {
-      playMessageDing();
-    }
-
-    await updateMyChatRef(sk, {
-      lastAt: v.createdAt || nowMs(),
-      sub: (v.content || "").slice(0, 90)
-    });
-
-    if (!(S.active?.type === "group" && S.active?.id === groupId && S.isWindowFocused)) {
-      await updateUnreadCounts();
-    } else {
-      await markActiveReadNow();
-    }
-  });
-
-  S.msgChildAddedUnsub = () => off(q, "child_added", handler);
-}
-
-/* ---------------------------
-   COMPOSER
----------------------------- */
-function onComposerKeyDown(e) {
-  if (!S.user || !S.active) return;
-  if (e.key === "Enter" && !e.shiftKey) {
-    e.preventDefault();
-    onSendClicked();
-  }
-}
-
-function onComposerInput() {
-  const t = String(S.ui.msgBox.value || "");
-  S.ui.countLine.textContent = `${t.length} / ${MAX_MESSAGE_CHARS}`;
-  replaceShortcodesInInput(S.ui.msgBox);
-
-  if (!S.active) return;
-
-  if (!S.isTyping && t.length > 0) {
-    S.isTyping = true;
-    setMyTyping(true);
-  }
-  if (S.isTyping && t.length === 0) {
-    S.isTyping = false;
-    setMyTyping(false);
-  }
-
-  if (S.typingTimer) clearTimeout(S.typingTimer);
-  S.typingTimer = setTimeout(() => {
-    S.isTyping = false;
-    setMyTyping(false);
-  }, 900);
-}
-
-function renderHomePanel() {
-  if (!S.ui?.messages) return;
-  if (S.active) return;
-  clear(S.ui.messages);
-  const wrap = el("div", { style: "display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; height:100%;" });
-  const title = el("div", { class: "chatTitle", text: "Welcome" });
-  const subtitle = el("div", { class: "hint", text: "Pick a chat, open your friends list, or tweak your settings." });
-  const actions = el("div", { class: "row", style: "justify-content:center;" }, [
-    el("button", { class: "btn", onclick: openFriendsModal }, ["Friends"]),
-    el("button", { class: "btn", onclick: openSettingsModal }, ["Settings"])
-  ]);
-  wrap.appendChild(title);
-  wrap.appendChild(subtitle);
-  wrap.appendChild(actions);
-  S.ui.messages.appendChild(wrap);
-}
-
-async function onSendClicked() {
-  if (!S.user || !S.active) { showToast("Select a chat first.", "warn"); return; }
-
-  const raw = String(S.ui.msgBox.value || "");
-  const contentTrim = raw.trim();
-  if (!contentTrim) return;
-
-  if (raw.length > MAX_MESSAGE_CHARS) {
-    showToast("Message too long.", "warn");
-    return;
-  }
-
-  const t = nowMs();
-  if (t - S.lastSendAt < SEND_COOLDOWN_MS) {
-    showToast("Slow down (cooldown).", "warn");
-    return;
-  }
-  S.lastSendAt = t;
-
-  if (contentTrim.startsWith("/")) {
-    S.ui.msgBox.value = "";
-    S.ui.countLine.textContent = `0 / ${MAX_MESSAGE_CHARS}`;
-    await handleCommand(contentTrim);
-    return;
-  }
-
-  try {
-    S.ui.sendBtn.disabled = true;
-
-    const msgObj = { authorId: S.uid, content: raw.slice(0, MAX_MESSAGE_CHARS), createdAt: nowMs() };
-
-    if (S.active.type === "dm") {
-      await ensureDmRecordExists(S.active.id);
-      await push(ref(db, `dmMessages/${S.active.id}`), msgObj);
-      await upsertMyChatRef("dm", S.active.id, S.active.name, null, msgObj.createdAt, msgObj.content.slice(0, 90));
-    } else {
-      await push(ref(db, `groupDmMessages/${S.active.id}`), msgObj);
-      await upsertMyChatRef("group", S.active.id, S.active.name, null, msgObj.createdAt, msgObj.content.slice(0, 90));
-    }
-
-    await updatePeoplePrivate(S.uid, {
-      messagesSent: (S.profile?.messagesSent || 0) + 1,
-      lastSeen: nowMs()
-    });
-    await incrementStatCounter(S.uid, "messagesSent", 1);
-    await logStatEvent(S.uid, "message-sent", { scopeType: S.active.type, scopeId: S.active.id });
-
-    S.ui.msgBox.value = "";
-    S.ui.countLine.textContent = `0 / ${MAX_MESSAGE_CHARS}`;
-    S.isTyping = false;
-    await setMyTyping(false);
-
-    await markActiveReadNow();
-  } catch (e) {
-    logFirebaseError("send-message", e);
-  } finally {
-    S.ui.sendBtn.disabled = false;
-  }
-}
-
 /* ---------------------------
    COMMANDS + REPORTS (simple)
 ---------------------------- */
@@ -2864,6 +2413,70 @@ const handleCommand = createCommandHandler({
   openReportModal,
   showToast,
   clearActiveChat
+});
+
+const {
+  renderSystemMessage,
+  clearChatListeners,
+  onComposerKeyDown,
+  onComposerInput,
+  onSendClicked,
+  renderHomePanel,
+  subscribeTyping,
+  setMyTyping,
+  subscribeMessagesDm,
+  subscribeMessagesGroup,
+  ensureDmRecordExists
+} = initMessaging({
+  APP_NAME,
+  BRAND_LINK,
+  MAX_MESSAGE_CHARS,
+  SEND_COOLDOWN_MS,
+  LOAD_LAST_N,
+  STATIC_EMOJI_URL,
+  SHORTCODES,
+  MESSAGE_DING_URL,
+  REACTION_EMOJIS,
+  QUICK_REACTION,
+  S,
+  db,
+  ref,
+  get,
+  set,
+  update,
+  remove,
+  push,
+  onValue,
+  onChildAdded,
+  off,
+  query,
+  orderByChild,
+  limitToLast,
+  nowMs,
+  escapeHtml,
+  el,
+  formatTime,
+  showToast,
+  handleCommand,
+  logFirebaseError,
+  updatePeoplePrivate,
+  incrementStatCounter,
+  logStatEvent,
+  replaceShortcodesInInput,
+  openChat,
+  updateMyChatRef,
+  ensureDmChatRefForIncoming,
+  ensureGroupChatRefForIncoming,
+  refreshChats,
+  updateUnreadCounts,
+  markActiveReadNow,
+  getAuthorDisplay,
+  scopeKey,
+  safeGet,
+  upsertMyChatRef,
+  openFriendsModal,
+  openSettingsModal,
+  clear
 });
 
 async function openReportModal(prefillReason = "") {
