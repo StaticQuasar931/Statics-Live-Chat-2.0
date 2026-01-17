@@ -19,7 +19,7 @@ export function initMessaging(deps) {
 
 function renderSystemMessage(text, replaceAll = false) {
   if (!ctx.S.ui?.messages) return;
-  if (replaceAll) clear(ctx.S.ui.messages);
+  if (replaceAll) ctx.clear(ctx.S.ui.messages);
 
   const row = ctx.el("div", { class: "msgRow system" });
   const bubble = ctx.el("div", { class: "msgBubble" }, [
@@ -390,7 +390,7 @@ function onComposerInput() {
 function renderHomePanel() {
   if (!ctx.S.ui?.messages) return;
   if (ctx.S.active) return;
-  clear(ctx.S.ui.messages);
+  ctx.clear(ctx.S.ui.messages);
   const wrap = ctx.el("div", { style: "display:flex; flex-direction:column; gap:12px; align-items:center; justify-content:center; height:100%;" });
   const title = ctx.el("div", { class: "chatTitle", text: "Welcome" });
   const subtitle = ctx.el("div", { class: "hint", text: "Pick a chat, open your friends list, or tweak your settings." });
