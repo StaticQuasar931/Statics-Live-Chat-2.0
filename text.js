@@ -434,14 +434,37 @@ async function onSendClicked() {
     ctx.S.ui.sendBtn.disabled = true;
 
     const msgObj = { authorId: ctx.S.uid, content: raw.slice(0, ctx.MAX_MESSAGE_CHARS), createdAt: ctx.nowMs() };
+    const scopeType = ctx.S.active.type === "dm" ? "dm" : "group";
+    const scopeId = ctx.S.active.id;
+    const sk = ctx.scopeKey(scopeType, scopeId);
+    if (!ctx.S._seenMsgKeys[sk]) ctx.S._seenMsgKeys[sk] = new Set();
 
-    if (ctx.S.active.type === "dm") {
-      await ensureDmRecordExists(ctx.S.active.id);
-      await ctx.push(ctx.ref(ctx.db, `dmMessages/${ctx.S.active.id}`), msgObj);
-      await ctx.upsertMyChatRef("dm", ctx.S.active.id, ctx.S.active.name, null, msgObj.createdAt, msgObj.content.slice(0, 90));
+    let msgRef = null;
+    if (scopeType === "dm") {
+      await ensureDmRecordExists(scopeId);
+      msgRef = ctx.push(ctx.ref(ctx.db, `dmMessages/${scopeId}`));
     } else {
-      await ctx.push(ctx.ref(ctx.db, `groupDmMessages/${ctx.S.active.id}`), msgObj);
-      await ctx.upsertMyChatRef("group", ctx.S.active.id, ctx.S.active.name, null, msgObj.createdAt, msgObj.content.slice(0, 90));
+      msgRef = ctx.push(ctx.ref(ctx.db, `groupDmMessages/${scopeId}`));
+    }
+
+    const msgKey = msgRef?.key || null;
+    if (msgRef) await ctx.set(msgRef, msgObj);
+
+    if (msgKey) ctx.S._seenMsgKeys[sk].add(msgKey);
+    addMessageToUI({
+      authorId: ctx.S.uid,
+      authorDisplay: ctx.S.profile?.displayNameDisplay || "You",
+      content: msgObj.content,
+      createdAt: msgObj.createdAt,
+      scopeType,
+      scopeId,
+      msgKey
+    });
+
+    if (scopeType === "dm") {
+      await ctx.upsertMyChatRef("dm", scopeId, ctx.S.active.name, null, msgObj.createdAt, msgObj.content.slice(0, 90));
+    } else {
+      await ctx.upsertMyChatRef("group", scopeId, ctx.S.active.name, null, msgObj.createdAt, msgObj.content.slice(0, 90));
     }
 
     await ctx.updatePeoplePrivate(ctx.S.uid, {
