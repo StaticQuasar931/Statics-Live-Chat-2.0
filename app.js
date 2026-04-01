@@ -3097,6 +3097,13 @@ async function refreshAll() {
   await loadMyChatState();
   await refreshFriendsAndRequests();
   await refreshChats();
+  const activeKey = S.active ? scopeKey(S.active.type, S.active.id) : null;
+  const activeChat = activeKey
+    ? (S.chats || []).find((c) => scopeKey(c.type, c.id) === activeKey) || S.active
+    : null;
+  if (activeChat && (!S.msgChildAddedUnsub || !S.ui?.messages || !S.ui.messages.childElementCount)) {
+    await openChat(activeChat).catch(() => {});
+  }
   await pruneOutgoingRequests().catch(() => {});
   await updateUnreadCounts().catch(() => {});
 }
