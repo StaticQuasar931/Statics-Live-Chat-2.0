@@ -6,11 +6,16 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/11.5.0/firebas
 import {
   getAuth,
   GoogleAuthProvider,
+  EmailAuthProvider,
   signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  signInAnonymously,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  linkWithCredential
 } from "https://www.gstatic.com/firebasejs/11.5.0/firebase-auth.js";
 import {
   getDatabase,
@@ -54,11 +59,17 @@ const BRAND_NAME = "StaticQuasar931";
 const BRAND_LINK = "https://sites.google.com/view/staticquasar931/gm3z";
 const RESERVED_NAMES = ["staticquasar931", "static"];
 const RESERVED_PARTS = ["static", "quasar", "quasar931"];
-const PEOPLE_ROOT = "people";
-const PEOPLE_DISPLAYNAMES = "peopleDisplayNames";
+const USERS_ROOT = "users";
+const PUBLIC_USERS_ROOT = "publicUsers";
+const DISPLAY_NAMES_ROOT = "displayNames";
+const PEOPLE_ROOT = PUBLIC_USERS_ROOT;
+const PEOPLE_DISPLAYNAMES = DISPLAY_NAMES_ROOT;
+const LEGACY_PEOPLE_ROOT = "people";
+const LEGACY_PEOPLE_DISPLAYNAMES = "peopleDisplayNames";
 
 const THEMES = ["dark", "light", "ocean", "forest", "sunset", "lavender", "midnight", "rose", "neon", "sand", "icy"];
 const DEFAULT_THEME = "dark";
+const ACTIVE_CHAT_STORAGE_KEY = "chat-active-v2";
 
 const SEND_COOLDOWN_MS = 500;
 const MAX_MESSAGE_CHARS = 4000; // must be <= 4000 (rules validate)
@@ -235,12 +246,17 @@ const S = {
   sessionId: null,
   appReady: false,
   peopleWriteEnabled: true,
+  activeListenerToken: 0,
+  bootstrappedRuntime: false,
+  presenceHeartbeatId: null,
+  pendingActiveRestore: null,
 
   ui: {},
 
   _nameCache: {},
   _seenMsgKeys: {}, // { scopeKey: Set(msgKey) }
   _reactionCache: {},
+  pendingMessages: {},
 
   isWindowFocused: true
 };
@@ -252,80 +268,96 @@ function nowMs() { return Date.now(); }
 const THEME_STORAGE_KEY = "chat-theme";
 
 function peoplePublicPath(uid) {
-  return `${PEOPLE_ROOT}/${uid}/public`;
+  return `${PUBLIC_USERS_ROOT}/${uid}`;
 }
 
 function peoplePrivatePath(uid) {
-  return `${PEOPLE_ROOT}/${uid}/private`;
+  return `${USERS_ROOT}/${uid}`;
 }
 
 function peopleStatsPath(uid) {
-  return `${PEOPLE_ROOT}/${uid}/stats`;
+  return `${USERS_ROOT}/${uid}/stats`;
+}
+
+function legacyPeoplePublicPath(uid) {
+  return `${LEGACY_PEOPLE_ROOT}/${uid}/public`;
+}
+
+function legacyPeoplePrivatePath(uid) {
+  return `${LEGACY_PEOPLE_ROOT}/${uid}/private`;
+}
+
+function legacyPeopleStatsPath(uid) {
+  return `${LEGACY_PEOPLE_ROOT}/${uid}/stats`;
+}
+
+function isPermissionDenied(err) {
+  return String(err?.code || "").includes("PERMISSION_DENIED");
 }
 
 async function updatePeoplePublic(uid, data) {
   if (S.peopleWriteEnabled) {
     try {
-      await update(ref(db, peoplePublicPath(uid)), data);
+      await update(ref(db, legacyPeoplePublicPath(uid)), data);
     } catch (err) {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     }
   }
-  await update(ref(db, `publicUsers/${uid}`), data).catch(() => {});
+  await update(ref(db, peoplePublicPath(uid)), data);
 }
 
 async function updatePeoplePrivate(uid, data) {
   if (S.peopleWriteEnabled) {
     try {
-      await update(ref(db, peoplePrivatePath(uid)), data);
+      await update(ref(db, legacyPeoplePrivatePath(uid)), data);
     } catch (err) {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     }
   }
-  await update(ref(db, `users/${uid}`), data).catch(() => {});
+  await update(ref(db, peoplePrivatePath(uid)), data);
 }
 
 async function setPeoplePublic(uid, data) {
   if (S.peopleWriteEnabled) {
     try {
-      await set(ref(db, peoplePublicPath(uid)), data);
+      await set(ref(db, legacyPeoplePublicPath(uid)), data);
     } catch (err) {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     }
   }
-  await set(ref(db, `publicUsers/${uid}`), data).catch(() => {});
+  await set(ref(db, peoplePublicPath(uid)), data);
 }
 
 async function setPeoplePrivate(uid, data) {
   if (S.peopleWriteEnabled) {
     try {
-      await set(ref(db, peoplePrivatePath(uid)), data);
+      await set(ref(db, legacyPeoplePrivatePath(uid)), data);
     } catch (err) {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     }
   }
-  await set(ref(db, `users/${uid}`), data).catch(() => {});
+  await set(ref(db, peoplePrivatePath(uid)), data);
 }
 
 async function removePeoplePrivate(uid, childPath) {
   if (S.peopleWriteEnabled) {
     try {
-      await remove(ref(db, `${peoplePrivatePath(uid)}/${childPath}`));
+      await remove(ref(db, `${legacyPeoplePrivatePath(uid)}/${childPath}`));
     } catch (err) {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     }
   }
-  await remove(ref(db, `users/${uid}/${childPath}`)).catch(() => {});
+  await remove(ref(db, `${peoplePrivatePath(uid)}/${childPath}`));
 }
 
 async function safeGet(refPath) {
@@ -339,27 +371,27 @@ async function safeGet(refPath) {
 async function updateMyChatRef(key, obj) {
   if (S.peopleWriteEnabled) {
     try {
-      await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${key}`), obj);
+      await update(ref(db, `${legacyPeoplePrivatePath(S.uid)}/chatRefs/${key}`), obj);
     } catch (err) {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     }
   }
-  await update(ref(db, `users/${S.uid}/chatRefs/${key}`), obj).catch(() => {});
+  await update(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs/${key}`), obj);
 }
 
 async function updateMyChatState(key, obj) {
   if (S.peopleWriteEnabled) {
     try {
-      await update(ref(db, `${peoplePrivatePath(S.uid)}/chatState/${key}`), obj);
+      await update(ref(db, `${legacyPeoplePrivatePath(S.uid)}/chatState/${key}`), obj);
     } catch (err) {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     }
   }
-  await update(ref(db, `users/${S.uid}/chatState/${key}`), obj).catch(() => {});
+  await update(ref(db, `${peoplePrivatePath(S.uid)}/chatState/${key}`), obj);
 }
 
 async function logStatEvent(uid, type, data = {}) {
@@ -367,30 +399,30 @@ async function logStatEvent(uid, type, data = {}) {
   const payload = { type, at: nowMs(), ...data };
   if (S.peopleWriteEnabled) {
     try {
-      await push(ref(db, `${peopleStatsPath(uid)}/events`), payload);
+      await push(ref(db, `${legacyPeopleStatsPath(uid)}/events`), payload);
     } catch (err) {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     }
   }
-  await push(ref(db, `users/${uid}/stats/events`), payload).catch(() => {});
+  await push(ref(db, `${peopleStatsPath(uid)}/events`), payload).catch(() => {});
 }
 
 async function incrementStatCounter(uid, key, delta = 1) {
   if (!uid) return;
-  const peopleRef = ref(db, `${peopleStatsPath(uid)}/counters/${key}`);
-  const legacyRef = ref(db, `users/${uid}/stats/counters/${key}`);
+  const peopleRef = ref(db, `${legacyPeopleStatsPath(uid)}/counters/${key}`);
+  const primaryRef = ref(db, `${peopleStatsPath(uid)}/counters/${key}`);
   if (S.peopleWriteEnabled) {
     try {
       await runTransaction(peopleRef, (value) => (value || 0) + delta);
     } catch (err) {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     }
   }
-  await runTransaction(legacyRef, (value) => (value || 0) + delta).catch(() => {});
+  await runTransaction(primaryRef, (value) => (value || 0) + delta).catch(() => {});
 }
 
 function createSessionId() {
@@ -402,22 +434,64 @@ async function startSessionTracking() {
   const sessionId = createSessionId();
   S.sessionId = sessionId;
   const payload = { startedAt: nowMs(), endedAt: null };
-  const peopleRef = ref(db, `${peopleStatsPath(S.uid)}/sessions/${sessionId}`);
-  const legacyRef = ref(db, `users/${S.uid}/stats/sessions/${sessionId}`);
+  const peopleRef = ref(db, `${legacyPeopleStatsPath(S.uid)}/sessions/${sessionId}`);
+  const primaryRef = ref(db, `${peopleStatsPath(S.uid)}/sessions/${sessionId}`);
   if (S.peopleWriteEnabled) {
     try {
       await set(peopleRef, payload);
     } catch (err) {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     }
   }
-  await set(legacyRef, payload).catch(() => {});
+  await set(primaryRef, payload).catch(() => {});
   if (S.peopleWriteEnabled) {
     onDisconnect(peopleRef).update({ endedAt: nowMs() }).catch(() => {});
   }
-  onDisconnect(legacyRef).update({ endedAt: nowMs() }).catch(() => {});
+  onDisconnect(primaryRef).update({ endedAt: nowMs() }).catch(() => {});
+}
+
+function loadStoredActiveChat() {
+  try {
+    const raw = localStorage.getItem(ACTIVE_CHAT_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function storeActiveChat(chat) {
+  try {
+    if (!chat?.type || !chat?.id) {
+      localStorage.removeItem(ACTIVE_CHAT_STORAGE_KEY);
+      return;
+    }
+    localStorage.setItem(ACTIVE_CHAT_STORAGE_KEY, JSON.stringify({
+      type: chat.type,
+      id: chat.id
+    }));
+  } catch {}
+}
+
+function ensureRuntimeObserversBooted() {
+  if (S.bootstrappedRuntime) return;
+  S.bootstrappedRuntime = true;
+
+  S.presenceHeartbeatId = window.setInterval(() => {
+    if (!S.uid) return;
+    setPresenceStatus(S.presenceStatus || "online", { updateLastSeen: true }).catch(() => {});
+  }, 25000);
+
+  window.addEventListener("focus", () => {
+    markActiveReadNow().catch(() => {});
+  });
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      markActiveReadNow().catch(() => {});
+    }
+  });
 }
 
 function normalizeDisplayName(name) {
@@ -1018,23 +1092,54 @@ function openSignInModal() {
       el("br"),
       "• Display names have no spaces and are unique (case-insensitive).",
       el("br"),
-      "• Privacy notice: We’re not responsible for user privacy or security. Please use at your own risk."
+      "• We store your sign-in details, chat messages, friend connections, and profile photo choice in Firebase so chat can work across refreshes.",
+      el("br"),
+      "• Do not share sensitive personal info or upload unsafe content."
     ])
   ]);
 
   const btn = el("button", { class: "googleBtn", "aria-label": "Continue with Google" }, [
     el("img", { src: GOOGLE_SIGNIN_IMG, alt: "Continue with Google" })
   ]);
+  const email = el("input", { class: "input", type: "email", placeholder: "Email" });
+  const password = el("input", { class: "input", type: "password", placeholder: "Password (6+ characters)" });
+  const emailRow = el("div", { style: "display:flex; flex-direction:column; gap:8px;" }, [email, password]);
+  const emailActions = el("div", { class: "row", style: "justify-content:flex-start;" }, [
+    el("button", { class: "btn btnPrimary", type: "button" }, ["Sign In"]),
+    el("button", { class: "btn", type: "button" }, ["Create Account"]),
+    el("button", { class: "btn", type: "button" }, ["Continue Anonymously"])
+  ]);
+  const [emailSignInBtn, emailCreateBtn, anonBtn] = emailActions.querySelectorAll("button");
   const cancel = el("button", { class: "btn" }, ["Cancel"]);
 
+  const setAuthBusy = (busy, label = "Continue with Google") => {
+    btn.disabled = busy;
+    email.disabled = busy;
+    password.disabled = busy;
+    emailSignInBtn.disabled = busy;
+    emailCreateBtn.disabled = busy;
+    anonBtn.disabled = busy;
+    btn.setAttribute("aria-busy", busy ? "true" : "false");
+    if (!busy) btn.title = "";
+    btn.textContent = label;
+    if (!busy) {
+      clear(btn);
+      btn.appendChild(el("img", { src: GOOGLE_SIGNIN_IMG, alt: "Continue with Google" }));
+    }
+  };
+
+  const finishAuth = async () => {
+    await handleSignedInUser(auth.currentUser);
+    m.close();
+  };
+
   btn.addEventListener("click", async () => {
-    btn.disabled = true;
+    setAuthBusy(true, "Opening Google...");
     try {
       const provider = new GoogleAuthProvider();
       provider.setCustomParameters({ prompt: "select_account" });
       await signInWithPopup(auth, provider);
-      await handleSignedInUser(auth.currentUser);
-      m.close();
+      await finishAuth();
     } catch (e) {
       const message = String(e?.message || "");
       const code = String(e?.code || "");
@@ -1055,13 +1160,69 @@ function openSignInModal() {
         logFirebaseError("auth-popup", e);
       }
       showToast(getFriendlyAuthError(e), "warn");
-      btn.disabled = false;
+      setAuthBusy(false);
+    }
+  });
+
+  emailSignInBtn.addEventListener("click", async () => {
+    const emailValue = String(email.value || "").trim();
+    const passwordValue = String(password.value || "");
+    if (!emailValue || !passwordValue) {
+      showToast("Enter your email and password.", "warn");
+      return;
+    }
+    setAuthBusy(true, "Signing in...");
+    try {
+      await signInWithEmailAndPassword(auth, emailValue, passwordValue);
+      await finishAuth();
+    } catch (e) {
+      logFirebaseError("auth-email-signin", e);
+      showToast("Email sign-in failed. Check your email and password.", "error");
+      setAuthBusy(false);
+    }
+  });
+
+  emailCreateBtn.addEventListener("click", async () => {
+    const emailValue = String(email.value || "").trim();
+    const passwordValue = String(password.value || "");
+    if (!emailValue || passwordValue.length < 6) {
+      showToast("Use a valid email and a password with at least 6 characters.", "warn");
+      return;
+    }
+    setAuthBusy(true, "Creating account...");
+    try {
+      if (auth.currentUser?.isAnonymous) {
+        const credential = EmailAuthProvider.credential(emailValue, passwordValue);
+        await linkWithCredential(auth.currentUser, credential);
+      } else {
+        await createUserWithEmailAndPassword(auth, emailValue, passwordValue);
+      }
+      await finishAuth();
+    } catch (e) {
+      logFirebaseError("auth-email-create", e);
+      showToast("Account creation failed. That email may already be in use.", "error");
+      setAuthBusy(false);
+    }
+  });
+
+  anonBtn.addEventListener("click", async () => {
+    setAuthBusy(true, "Starting guest chat...");
+    try {
+      await signInAnonymously(auth);
+      await finishAuth();
+    } catch (e) {
+      logFirebaseError("auth-anonymous", e);
+      showToast("Anonymous sign-in failed.", "error");
+      setAuthBusy(false);
     }
   });
 
   cancel.addEventListener("click", () => m.close());
 
   m.body.appendChild(info);
+  m.body.appendChild(el("div", { class: "hr" }));
+  m.body.appendChild(emailRow);
+  m.body.appendChild(emailActions);
   m.footer.appendChild(el("div", { class: "row" }, [cancel, btn]));
 }
 
@@ -1177,7 +1338,7 @@ async function ensureUserProfile(user) {
 async function loadProfile(uid) {
   const peopleSnap = await safeGet(ref(db, peoplePrivatePath(uid)));
   if (peopleSnap?.exists?.()) return peopleSnap.val();
-  const snap = await safeGet(ref(db, `users/${uid}`));
+  const snap = await safeGet(ref(db, legacyPeoplePrivatePath(uid)));
   return snap?.exists?.() ? snap.val() : null;
 }
 
@@ -1194,34 +1355,24 @@ async function loadIsAdmin(uid) {
    DISPLAY NAME MODAL
 ---------------------------- */
 async function isDisplayNameTaken(normalized, myUid) {
-  const indexSnap = await safeGet(ref(db, PEOPLE_DISPLAYNAMES));
+  const indexSnap = await safeGet(ref(db, DISPLAY_NAMES_ROOT));
   if (indexSnap?.exists?.()) {
     const owner = indexSnap.val()?.[normalized] || null;
     if (owner && owner !== myUid) return true;
   }
 
-  const legacyIndex = await safeGet(ref(db, "displayNames"));
+  const legacyIndex = await safeGet(ref(db, LEGACY_PEOPLE_DISPLAYNAMES));
   if (legacyIndex?.exists?.()) {
     const owner = legacyIndex.val()?.[normalized] || null;
     if (owner && owner !== myUid) return true;
   }
 
-  const snap = await safeGet(ref(db, PEOPLE_ROOT));
-  if (!snap?.exists?.()) {
-    const legacyPublic = await safeGet(ref(db, "publicUsers"));
-    if (!legacyPublic?.exists?.()) return false;
-    const all = legacyPublic.val() || {};
-    for (const [uid, u] of Object.entries(all)) {
-      if (uid === myUid) continue;
-      const dn = normalizeDisplayName(u?.displayNameDisplay || "");
-      if (dn && dn === normalized) return true;
-    }
-    return false;
-  }
+  const snap = await safeGet(ref(db, PUBLIC_USERS_ROOT));
+  if (!snap?.exists?.()) return false;
   const all = snap.val() || {};
   for (const [uid, u] of Object.entries(all)) {
     if (uid === myUid) continue;
-    const dn = normalizeDisplayName(u?.public?.displayNameDisplay || "");
+    const dn = normalizeDisplayName(u?.displayNameDisplay || "");
     if (dn && dn === normalized) return true;
   }
   return false;
@@ -1270,23 +1421,23 @@ async function applyDisplayName(nextName, previousName, reason) {
   S._nameCache[S.uid] = raw;
 
   if (previousNormalized && previousNormalized !== normalized) {
-    await remove(ref(db, `displayNames/${previousNormalized}`)).catch(() => {});
+    await remove(ref(db, `${DISPLAY_NAMES_ROOT}/${previousNormalized}`)).catch(() => {});
     if (S.peopleWriteEnabled) {
-      await remove(ref(db, `${PEOPLE_DISPLAYNAMES}/${previousNormalized}`)).catch((err) => {
-        if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+      await remove(ref(db, `${LEGACY_PEOPLE_DISPLAYNAMES}/${previousNormalized}`)).catch((err) => {
+        if (isPermissionDenied(err)) {
           S.peopleWriteEnabled = false;
         }
       });
     }
   }
   try {
-    await set(ref(db, `displayNames/${normalized}`), S.uid);
+    await set(ref(db, `${DISPLAY_NAMES_ROOT}/${normalized}`), S.uid);
   } catch {
-    // Legacy displayNames write failed; continue without blocking the UI.
+    // Keep going if the normalized name index write temporarily fails.
   }
   if (S.peopleWriteEnabled) {
-    await set(ref(db, `${PEOPLE_DISPLAYNAMES}/${normalized}`), S.uid).catch((err) => {
-      if (String(err?.code || "").includes("PERMISSION_DENIED")) {
+    await set(ref(db, `${LEGACY_PEOPLE_DISPLAYNAMES}/${normalized}`), S.uid).catch((err) => {
+      if (isPermissionDenied(err)) {
         S.peopleWriteEnabled = false;
       }
     });
@@ -1553,11 +1704,11 @@ function renderSignedOut() {
   ]);
 
   const copy = el("div", { class: "hint" }, [
-    "Sign in to chat with friends, create group DMs, and use simple commands.",
+    "Sign in with Google, email/password, or an anonymous guest session to chat with friends, create group DMs, and use simple commands.",
     el("br"),
-    "This is a work in progress. Don’t share sensitive personal info.",
+    "Chat data, friend connections, display names, and your avatar choice are stored in Firebase so your chats survive refreshes.",
     el("br"),
-    "Your Google profile picture is used as your account avatar by default. You can change this in Settings."
+    "Your Google profile picture is used as your account avatar by default. You can change this in Settings, and you should avoid sharing sensitive personal info."
   ]);
 
   const signInBtn = el("button", { class: "googleBtn", onclick: openSignInModal, "aria-label": "Sign in with Google" }, [
@@ -1855,7 +2006,7 @@ function renderFriendRequests() {
 
     const btns = el("div", { class: "reqBtns" }, [
       el("button", { class: "btnTiny no", onclick: () => declineFriendRequest(req.fromUid) }, ["✕"]),
-      el("button", { class: "btnTiny ok", onclick: () => acceptFriendRequest(req.fromUid) }, ["✓"])
+      el("button", { class: "btnTiny ok", onclick: () => acceptFriendRequestStable(req.fromUid) }, ["✓"])
     ]);
 
     item.appendChild(left);
@@ -2022,6 +2173,91 @@ function deterministicDmId(a, b) {
   return [a, b].sort().join("_");
 }
 
+async function getAllPublicUsersMap() {
+  const snap = await safeGet(ref(db, PUBLIC_USERS_ROOT));
+  if (snap?.exists?.()) return snap.val() || {};
+
+  const legacySnap = await safeGet(ref(db, LEGACY_PEOPLE_ROOT));
+  if (!legacySnap?.exists?.()) return {};
+
+  const out = {};
+  for (const [uid, node] of Object.entries(legacySnap.val() || {})) {
+    if (node?.public) out[uid] = node.public;
+  }
+  return out;
+}
+
+function buildFriendRecord(uid, displayName, photoURL, since = nowMs()) {
+  return {
+    uid,
+    displayNameDisplay: displayName || "Friend",
+    photoURL: photoURL || null,
+    since
+  };
+}
+
+function buildChatRefRecord(type, id, name, photoURL, sub, lastAt, hidden = false) {
+  return {
+    type,
+    id,
+    name: name || "Chat",
+    photoURL: photoURL || null,
+    sub: sub || "",
+    lastAt: lastAt || nowMs(),
+    hidden: !!hidden
+  };
+}
+
+async function ensureDmConversation(dmId, members = []) {
+  if (!dmId) return;
+  const ids = Array.from(new Set(members.filter(Boolean)));
+  if (ids.length < 2) return;
+
+  await runTransaction(ref(db, `dms/${dmId}`), (current) => {
+    const existing = current || {};
+    const memberIds = { ...(existing.memberIds || {}) };
+    ids.forEach((uid) => { memberIds[uid] = true; });
+    return {
+      ...existing,
+      createdAt: existing.createdAt || nowMs(),
+      memberIds
+    };
+  }).catch(() => {});
+}
+
+async function repairMutualFriendship(otherUid, displayName, photoURL) {
+  if (!S.uid || !otherUid) return null;
+  const dmId = deterministicDmId(S.uid, otherUid);
+  const ts = nowMs();
+  const otherPublic = S.publicUsers?.[otherUid] || {};
+  const myPublic = S.publicUsers?.[S.uid] || {};
+  const myDisplay = S.profile?.displayNameDisplay || myPublic.displayNameDisplay || "Friend";
+  const myPhoto = S.profile?.photoURL || S.user?.photoURL || myPublic.photoURL || null;
+  const otherDisplay = displayName || otherPublic.displayNameDisplay || "Friend";
+  const otherPhoto = photoURL ?? otherPublic.photoURL ?? null;
+
+  await ensureDmConversation(dmId, [S.uid, otherUid]);
+
+  const updates = {
+    [`${USERS_ROOT}/${S.uid}/friends/${otherUid}`]: buildFriendRecord(otherUid, otherDisplay, otherPhoto, ts),
+    [`${USERS_ROOT}/${otherUid}/friends/${S.uid}`]: buildFriendRecord(S.uid, myDisplay, myPhoto, ts),
+    [`${USERS_ROOT}/${S.uid}/chatRefs/${scopeKey("dm", dmId)}`]: buildChatRefRecord("dm", dmId, otherDisplay, otherPhoto, "DM ready", ts),
+    [`${USERS_ROOT}/${otherUid}/chatRefs/${scopeKey("dm", dmId)}`]: buildChatRefRecord("dm", dmId, myDisplay, myPhoto, "DM ready", ts),
+    [`${USERS_ROOT}/${S.uid}/friendRequestsOut/${otherUid}`]: null,
+    [`${USERS_ROOT}/${S.uid}/friendRequestsIn/${otherUid}`]: null,
+    [`${USERS_ROOT}/${otherUid}/friendRequestsOut/${S.uid}`]: null,
+    [`${USERS_ROOT}/${otherUid}/friendRequestsIn/${S.uid}`]: null
+  };
+
+  await update(ref(db), updates);
+
+  S.friends[otherUid] = buildFriendRecord(otherUid, otherDisplay, otherPhoto, ts);
+  delete S.friendRequestsIn[otherUid];
+  delete S.friendRequestsOut[otherUid];
+
+  return { dmId, otherDisplay, otherPhoto, createdAt: ts };
+}
+
 async function acceptFriendRequest(fromUid) {
   try {
     const pub = await safeGet(ref(db, peoplePublicPath(fromUid)));
@@ -2065,6 +2301,105 @@ async function acceptFriendRequest(fromUid) {
   }
 }
 
+async function sendFriendRequestByDisplayOrEmail(input) {
+  const raw = String(input || "").trim();
+  if (!raw) return;
+
+  const normalized = normalizeDisplayName(raw);
+  const all = await getAllPublicUsersMap();
+  if (!Object.keys(all).length) throw new Error("No users found yet.");
+
+  let targetUid = null;
+  let targetDisplay = null;
+  let targetPhoto = null;
+  for (const [uid, user] of Object.entries(all)) {
+    const display = user?.displayNameDisplay || "";
+    if (normalizeDisplayName(display) === normalized) {
+      targetUid = uid;
+      targetDisplay = display || raw;
+      targetPhoto = user?.photoURL || null;
+      break;
+    }
+  }
+
+  if (!targetUid) throw new Error("User not found.");
+  if (targetUid === S.uid) throw new Error("You cannot add yourself.");
+  if (S.friends?.[targetUid]) throw new Error("You are already friends.");
+  if (S.friendRequestsOut?.[targetUid]) throw new Error("Friend request already sent.");
+  if (S.profile?.blocks?.[targetUid]) throw new Error("You blocked this user.");
+
+  const createdAt = nowMs();
+  const updates = {
+    [`${USERS_ROOT}/${S.uid}/friendRequestsOut/${targetUid}`]: {
+      toUid: targetUid,
+      toDisplay: targetDisplay,
+      toPhoto: targetPhoto,
+      createdAt
+    },
+    [`${USERS_ROOT}/${targetUid}/friendRequestsIn/${S.uid}`]: {
+      fromUid: S.uid,
+      fromDisplay: S.profile?.displayNameDisplay || "Friend",
+      fromPhoto: S.profile?.photoURL || S.user?.photoURL || null,
+      createdAt
+    }
+  };
+
+  await update(ref(db), updates);
+  S.friendRequestsOut[targetUid] = updates[`${USERS_ROOT}/${S.uid}/friendRequestsOut/${targetUid}`];
+
+  await incrementStatCounter(S.uid, "friendRequestsSent", 1);
+  await logStatEvent(S.uid, "friend-request-sent", { toUid: targetUid });
+  showToast(`Friend request sent to ${targetDisplay}.`, "ok");
+}
+
+async function declineFriendRequest(fromUid) {
+  try {
+    const updates = {
+      [`${USERS_ROOT}/${S.uid}/friendRequestsIn/${fromUid}`]: null,
+      [`${USERS_ROOT}/${fromUid}/friendRequestsOut/${S.uid}`]: null
+    };
+    await update(ref(db), updates);
+    delete S.friendRequestsIn[fromUid];
+    await incrementStatCounter(S.uid, "friendRequestsDeclined", 1);
+    await logStatEvent(S.uid, "friend-request-declined", { fromUid });
+    showToast("Request declined.", "ok");
+  } catch {
+    showToast("Failed to decline.", "error");
+  }
+}
+
+async function cancelOutgoingRequest(toUid, { silent = false } = {}) {
+  if (!toUid) return;
+  await update(ref(db), {
+    [`${USERS_ROOT}/${S.uid}/friendRequestsOut/${toUid}`]: null,
+    [`${USERS_ROOT}/${toUid}/friendRequestsIn/${S.uid}`]: null
+  });
+  delete S.friendRequestsOut[toUid];
+  if (!silent) showToast("Request canceled.", "ok");
+}
+
+async function ensureFriendshipFromOutgoing(otherUid, displayName, photoURL) {
+  if (!otherUid || S.friends?.[otherUid] || !S.friendRequestsOut?.[otherUid]) return;
+  await repairMutualFriendship(otherUid, displayName, photoURL);
+}
+
+async function acceptFriendRequestStable(fromUid) {
+  try {
+    const pub = await safeGet(ref(db, peoplePublicPath(fromUid)));
+    const legacyPub = pub?.exists?.() ? null : await safeGet(ref(db, legacyPeoplePublicPath(fromUid)));
+    const pubData = pub?.exists?.() ? pub.val() : (legacyPub?.val?.() || {});
+    const repaired = await repairMutualFriendship(fromUid, pubData?.displayNameDisplay, pubData?.photoURL);
+    if (!repaired) throw new Error("Friendship repair failed.");
+    await incrementStatCounter(S.uid, "friendRequestsAccepted", 1);
+    await logStatEvent(S.uid, "friend-request-accepted", { fromUid });
+    showToast(`Friends with ${repaired.otherDisplay}. DM created.`, "ok");
+    await refreshChats();
+    await openChat({ type: "dm", id: repaired.dmId, name: repaired.otherDisplay, photoURL: repaired.otherPhoto, members: [S.uid, fromUid] });
+  } catch {
+    showToast("Failed to accept request.", "error");
+  }
+}
+
 /* ---------------------------
    CHATS (per-user refs + unread)
 ---------------------------- */
@@ -2095,6 +2430,7 @@ async function upsertMyChatRef(type, id, name, photoURL, lastAt, sub, options = 
 
 async function clearActiveChat() {
   S.active = null;
+  storeActiveChat(null);
   clearChatListeners();
   renderHomePanel();
   renderChatList();
@@ -2308,7 +2644,9 @@ async function openChat(chat) {
   }
 
   clearChatListeners();
+  const listenerToken = ++S.activeListenerToken;
   S.active = { type: chat.type, id: chat.id, name: chat.name || "Chat", members: chat.members || [] };
+  storeActiveChat(S.active);
   clear(S.ui.messages);
 
   // reset seen msg keys for this scope
@@ -2317,8 +2655,8 @@ async function openChat(chat) {
 
   if (chat.type === "dm") {
     await ensureDmChatRefExists(chat);
-    await subscribeMessagesDm(chat.id);
-    subscribeTyping("dm", chat.id);
+    await subscribeMessagesDm(chat.id, listenerToken);
+    subscribeTyping("dm", chat.id, listenerToken);
   } else {
     const groupSnap = await get(ref(db, `groupDms/${chat.id}`));
     if (!groupSnap.exists()) {
@@ -2333,8 +2671,8 @@ async function openChat(chat) {
     S.active.ownerId = g.ownerId || g.createdBy || "";
 
     await upsertMyChatRef("group", chat.id, S.active.name, null, undefined, "Group DM", { preserveLastAt: true });
-    await subscribeMessagesGroup(chat.id);
-    subscribeTyping("group", chat.id);
+    await subscribeMessagesGroup(chat.id, listenerToken);
+    subscribeTyping("group", chat.id, listenerToken);
   }
 
   if (S.ui.chatTitle) S.ui.chatTitle.textContent = S.active.name;
@@ -3073,7 +3411,7 @@ async function refreshChats() {
   let snap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/chatRefs`));
   let refsObj = snap?.exists?.() ? (snap.val() || {}) : {};
   if (!snap?.exists?.() || Object.keys(refsObj).length === 0) {
-    const legacy = await safeGet(ref(db, `users/${S.uid}/chatRefs`));
+    const legacy = await safeGet(ref(db, `${legacyPeoplePrivatePath(S.uid)}/chatRefs`));
     const legacyRefs = legacy?.exists?.() ? (legacy.val() || {}) : {};
     if (!snap?.exists?.() || Object.keys(refsObj).length === 0) {
       refsObj = Object.keys(legacyRefs).length ? legacyRefs : refsObj;
@@ -3083,11 +3421,15 @@ async function refreshChats() {
   if (!S.active && S.chats.length === 0) {
     renderHomePanel();
   } else if (!S.active && S.chats.length > 0 && !S.autoOpenInProgress) {
-    const next = [...S.chats].sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0))[0];
+    const restore = S.pendingActiveRestore || loadStoredActiveChat();
+    const next = restore
+      ? (S.chats || []).find((chat) => chat.type === restore.type && chat.id === restore.id)
+      : [...S.chats].sort((a, b) => (b.lastAt || 0) - (a.lastAt || 0))[0];
     if (next) {
       S.autoOpenInProgress = true;
       await openChat(next).catch(() => {});
       S.autoOpenInProgress = false;
+      S.pendingActiveRestore = null;
     }
   }
 }
@@ -3226,28 +3568,20 @@ function subscribeDmPreview(dmId) {
 
 function subscribePublicUsers() {
   if (S.publicUsersUnsub) { try { S.publicUsersUnsub(); } catch {} }
-  const refPath = ref(db, PEOPLE_ROOT);
+  const refPath = ref(db, PUBLIC_USERS_ROOT);
   const handler = onValue(refPath, (snap) => {
-    const raw = snap.exists() ? (snap.val() || {}) : {};
-    const map = {};
-    for (const [uid, node] of Object.entries(raw)) {
-      if (node?.public) map[uid] = node.public;
-    }
-    if (Object.keys(map).length) {
-      S.publicUsers = map;
-    } else {
-      S.publicUsers = {};
-      get(ref(db, "publicUsers")).then((legacy) => {
-        if (legacy.exists()) S.publicUsers = legacy.val() || {};
-        renderFriendsModalLists();
-        renderChatList();
-      }).catch(() => {});
-    }
+    const map = snap.exists() ? (snap.val() || {}) : {};
+    S.publicUsers = map;
     renderFriendsModalLists();
     renderChatList();
   }, () => {
-    get(ref(db, "publicUsers")).then((legacy) => {
-      S.publicUsers = legacy.exists() ? (legacy.val() || {}) : {};
+    get(ref(db, LEGACY_PEOPLE_ROOT)).then((legacy) => {
+      const raw = legacy.exists() ? (legacy.val() || {}) : {};
+      const map = {};
+      for (const [uid, node] of Object.entries(raw)) {
+        if (node?.public) map[uid] = node.public;
+      }
+      S.publicUsers = map;
       renderFriendsModalLists();
       renderChatList();
     }).catch(() => {});
@@ -3457,6 +3791,7 @@ async function handleSignedInUser(user) {
   if (S.appReady && S.uid === user.uid) return;
   S.user = user;
   S.uid = user.uid;
+  S.pendingActiveRestore = loadStoredActiveChat();
 
   await ensureUserProfile(user);
   S.profile = await loadProfile(S.uid);
@@ -3479,20 +3814,8 @@ async function handleSignedInUser(user) {
   subscribePublicUsers();
   subscribeMyDms();
   await refreshAll();
-
-  // Keep lastSeen updated sometimes
-  setInterval(() => {
-    if (!S.uid) return;
-    setPresenceStatus(S.presenceStatus || "online", { updateLastSeen: true }).catch(() => {});
-  }, 25000);
-
+  ensureRuntimeObserversBooted();
   startPresenceTracking();
-
-  // when window returns focus, mark active as read
-  window.addEventListener("focus", () => { markActiveReadNow().catch(() => {}); });
-  document.addEventListener("visibilitychange", () => {
-    if (!document.hidden) markActiveReadNow().catch(() => {});
-  });
 
   S.appReady = true;
 }
@@ -3512,6 +3835,8 @@ onAuthStateChanged(auth, async (user) => {
       S._nameCache = {};
       S._seenMsgKeys = {};
       S.sessionId = null;
+      S.pendingActiveRestore = null;
+      storeActiveChat(null);
       clearChatListeners();
       if (S.userDataUnsub) { try { S.userDataUnsub(); } catch {} S.userDataUnsub = null; }
       if (S.chatRefsUnsub) { try { S.chatRefsUnsub(); } catch {} S.chatRefsUnsub = null; }

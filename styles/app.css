@@ -328,6 +328,7 @@
   .msgRow{ display:flex; }
   .msgRow.me{ justify-content:flex-end; }
   .msgRow.system{ justify-content:center; }
+  .msgRow[data-pending-key]{ opacity: .96; }
   .msgBubble{
     max-width: min(720px, 92%);
     border: 1px solid var(--border);
@@ -340,6 +341,14 @@
   .msgBubble:hover{
     transform: translateY(-1px);
     box-shadow: 0 12px 22px rgba(0,0,0,.26);
+  }
+  .msgBubble-pending{
+    border-style: dashed;
+    opacity: .9;
+  }
+  .msgBubble-error{
+    border-color: rgba(255,77,77,.45);
+    background: rgba(255,77,77,.08);
   }
   .msgRow.me .msgBubble{
     background: rgba(106,167,255,.12);
@@ -373,6 +382,30 @@
     margin-top:8px;
     font-size:11px;
     color:var(--muted);
+  }
+  .msgStatus{
+    margin-top:8px;
+    font-size:11px;
+    color:var(--muted);
+    display:flex;
+    align-items:center;
+    gap:8px;
+  }
+  .msgStatus-error{
+    color:#ffd7d7;
+  }
+  .retryBtn{
+    border:1px solid rgba(255,77,77,.35);
+    background: rgba(255,77,77,.14);
+    color: var(--text);
+    padding:4px 10px;
+    border-radius:999px;
+    cursor:pointer;
+    font-size:11px;
+    font-weight:900;
+  }
+  .retryBtn:hover{
+    background: rgba(255,77,77,.2);
   }
   .msgAuthor{ font-weight:900; color: var(--muted); }
   .msgCode{ font-variant-numeric: tabular-nums; }

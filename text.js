@@ -150,9 +150,18 @@ function subscribeReactions(scopeType, scopeId, msgKey, summaryNode, buttonMap) 
   ctx.S.reactionUnsubs.push(() => ctx.off(rRef, "value", handler));
 }
 
+function pendingMessageKey(scopeType, scopeId, msg) {
+  return `${scopeType}:${scopeId}:${msg.authorId}:${msg.createdAt}:${msg.content}`;
+}
+
 function addMessageToUI(msg) {
   const messages = ctx.S.ui.messages;
   if (!messages) return;
+
+  if (msg.msgKey) {
+    const existing = messages.querySelector(`[data-msg-key="${msg.msgKey}"]`);
+    if (existing) return;
+  }
 
   const isMe = msg.authorId === ctx.S.uid;
   const isSystem = String(msg.content || "").startsWith("🧩");
@@ -160,6 +169,9 @@ function addMessageToUI(msg) {
   const emojiState = getEmojiOnlyState(msg.content);
   const isSingleEmoji = emojiState.emojiOnly && emojiState.emojiCount === 1;
   const row = ctx.el("div", { class: `msgRow ${isSystem ? "system" : (isMe ? "me" : "")}` });
+
+  if (msg.pendingKey) row.dataset.pendingKey = msg.pendingKey;
+  if (msg.msgKey) row.dataset.msgKey = msg.msgKey;
 
   const authorDisplay = msg.authorDisplay || "User";
   const timeText = ctx.formatTime(msg.createdAt || ctx.nowMs());
@@ -174,8 +186,22 @@ function addMessageToUI(msg) {
     ctx.el("span", { class: "msgCode", text: timeText })
   ]);
 
-  const bubble = ctx.el("div", { class: "msgBubble" }, [content, meta]);
+  const bubble = ctx.el("div", { class: msg.sendState ? `msgBubble msgBubble-${msg.sendState}` : "msgBubble" }, [content, meta]);
   bubble.title = `${authorDisplay} • ${timeText}`;
+
+  if (msg.sendState) {
+    const status = ctx.el("div", { class: `msgStatus msgStatus-${msg.sendState}` });
+    status.textContent =
+      msg.sendState === "pending" ? "Sending..." :
+      msg.sendState === "error" ? "Failed to send." :
+      "Sent";
+    if (msg.sendState === "error" && typeof msg.onRetry === "function") {
+      const retry = ctx.el("button", { class: "retryBtn", type: "button", text: "Retry" });
+      retry.addEventListener("click", msg.onRetry);
+      status.appendChild(retry);
+    }
+    bubble.appendChild(status);
+  }
 
   if (msg.scopeType && msg.scopeId && msg.msgKey) {
     const actions = ctx.el("div", { class: "msgActions" });
@@ -210,19 +236,67 @@ function addMessageToUI(msg) {
 
   row.appendChild(bubble);
   messages.appendChild(row);
-
   messages.scrollTop = messages.scrollHeight;
 }
 
-function subscribeTyping(scopeType, scopeId) {
+function reconcilePendingMessage(scopeType, scopeId, message) {
+  const key = pendingMessageKey(scopeType, scopeId, message);
+  const existing = ctx.S.ui.messages?.querySelector(`[data-pending-key="${CSS.escape(key)}"]`);
+  if (existing) existing.remove();
+  delete ctx.S.pendingMessages[key];
+}
+
+function renderPendingMessage(scopeType, scopeId, msgObj, onRetry) {
+  const key = pendingMessageKey(scopeType, scopeId, msgObj);
+  ctx.S.pendingMessages[key] = { scopeType, scopeId, msgObj, onRetry };
+  addMessageToUI({
+    authorId: msgObj.authorId,
+    authorDisplay: ctx.S.profile?.displayNameDisplay || "You",
+    content: msgObj.content,
+    createdAt: msgObj.createdAt,
+    scopeType,
+    scopeId,
+    pendingKey: key,
+    sendState: "pending"
+  });
+  return key;
+}
+
+function markPendingMessageError(pendingKey) {
+  const row = ctx.S.ui.messages?.querySelector(`[data-pending-key="${CSS.escape(pendingKey)}"]`);
+  if (!row) return;
+
+  const pending = ctx.S.pendingMessages[pendingKey];
+  const replacement = row.cloneNode(true);
+  replacement.innerHTML = "";
+  const retry = pending?.onRetry || (() => {});
+  ctx.S.pendingMessages[pendingKey] = { ...pending, onRetry: retry };
+  row.remove();
+
+  addMessageToUI({
+    authorId: pending?.msgObj?.authorId || ctx.S.uid,
+    authorDisplay: ctx.S.profile?.displayNameDisplay || "You",
+    content: pending?.msgObj?.content || "",
+    createdAt: pending?.msgObj?.createdAt || ctx.nowMs(),
+    scopeType: pending?.scopeType || ctx.S.active?.type || "dm",
+    scopeId: pending?.scopeId || ctx.S.active?.id || "",
+    pendingKey,
+    sendState: "error",
+    onRetry: retry
+  });
+}
+
+function subscribeTyping(scopeType, scopeId, listenerToken = ctx.S.activeListenerToken) {
   const tRef = ctx.ref(ctx.db, `typing/${scopeType}/${scopeId}`);
   const handler = ctx.onValue(tRef, async (snap) => {
+    if (listenerToken !== ctx.S.activeListenerToken) return;
     const v = snap.val() || {};
     const typers = [];
     for (const [uid, info] of Object.entries(v)) {
       if (uid === ctx.S.uid) continue;
       if (info?.typing === true) typers.push(await ctx.getAuthorDisplay(uid));
     }
+    if (!ctx.S.ui?.typingLine) return;
     if (!typers.length) ctx.S.ui.typingLine.textContent = "";
     else if (typers.length === 1) ctx.S.ui.typingLine.textContent = `${typers[0]} is typing...`;
     else ctx.S.ui.typingLine.textContent = `${typers.slice(0, 3).join(", ")} are typing...`;
@@ -259,39 +333,44 @@ async function ensureDmRecordExists(dmId) {
   }
 }
 
-async function subscribeMessagesDm(dmId) {
+async function subscribeMessagesDm(dmId, listenerToken = ctx.S.activeListenerToken) {
   const msgRef = ctx.ref(ctx.db, `dmMessages/${dmId}`);
   const q = ctx.query(msgRef, ctx.orderByChild("createdAt"), ctx.limitToLast(ctx.LOAD_LAST_N));
-
   const sk = ctx.scopeKey("dm", dmId);
 
   const handler = ctx.onChildAdded(q, async (snap) => {
+    if (listenerToken !== ctx.S.activeListenerToken) return;
     const msgKey = snap.key;
     if (!msgKey) return;
     if (ctx.S._seenMsgKeys[sk]?.has(msgKey)) return;
+    if (!ctx.S._seenMsgKeys[sk]) ctx.S._seenMsgKeys[sk] = new Set();
     ctx.S._seenMsgKeys[sk].add(msgKey);
 
     const v = snap.val();
     if (!v) return;
 
+    const createdAt = v.createdAt || ctx.nowMs();
     const authorDisplay = await ctx.getAuthorDisplay(v.authorId);
     const hadChat = (ctx.S.chats || []).some((c) => c.type === "dm" && c.id === dmId);
-    await ctx.ensureDmChatRefForIncoming(dmId, v.createdAt || ctx.nowMs(), v.content || "");
+    await ctx.ensureDmChatRefForIncoming(dmId, createdAt, v.content || "");
+    reconcilePendingMessage("dm", dmId, {
+      authorId: v.authorId,
+      createdAt,
+      content: v.content || ""
+    });
     addMessageToUI({
       authorId: v.authorId,
       authorDisplay,
       content: v.content || "",
-      createdAt: v.createdAt || ctx.nowMs(),
+      createdAt,
       scopeType: "dm",
       scopeId: dmId,
       msgKey
     });
-    if (v.authorId && v.authorId !== ctx.S.uid) {
-      playMessageDing();
-    }
+    if (v.authorId && v.authorId !== ctx.S.uid) playMessageDing();
 
     await ctx.updateMyChatRef(sk, {
-      lastAt: v.createdAt || ctx.nowMs(),
+      lastAt: createdAt,
       sub: (v.content || "").slice(0, 90)
     });
 
@@ -299,6 +378,7 @@ async function subscribeMessagesDm(dmId) {
       await ctx.refreshChats();
       const otherDisplay = v.authorId === ctx.S.uid ? ctx.S.profile?.displayNameDisplay : authorDisplay;
       await ctx.openChat({ type: "dm", id: dmId, name: otherDisplay });
+      return;
     }
 
     if (!(ctx.S.active?.type === "dm" && ctx.S.active?.id === dmId && ctx.S.isWindowFocused)) {
@@ -311,38 +391,43 @@ async function subscribeMessagesDm(dmId) {
   ctx.S.msgChildAddedUnsub = () => ctx.off(q, "child_added", handler);
 }
 
-async function subscribeMessagesGroup(groupId) {
+async function subscribeMessagesGroup(groupId, listenerToken = ctx.S.activeListenerToken) {
   const msgRef = ctx.ref(ctx.db, `groupDmMessages/${groupId}`);
   const q = ctx.query(msgRef, ctx.orderByChild("createdAt"), ctx.limitToLast(ctx.LOAD_LAST_N));
-
   const sk = ctx.scopeKey("group", groupId);
 
   const handler = ctx.onChildAdded(q, async (snap) => {
+    if (listenerToken !== ctx.S.activeListenerToken) return;
     const msgKey = snap.key;
     if (!msgKey) return;
     if (ctx.S._seenMsgKeys[sk]?.has(msgKey)) return;
+    if (!ctx.S._seenMsgKeys[sk]) ctx.S._seenMsgKeys[sk] = new Set();
     ctx.S._seenMsgKeys[sk].add(msgKey);
 
     const v = snap.val();
     if (!v) return;
 
+    const createdAt = v.createdAt || ctx.nowMs();
     const authorDisplay = await ctx.getAuthorDisplay(v.authorId);
-    await ctx.ensureGroupChatRefForIncoming(groupId, v.createdAt || ctx.nowMs(), v.content || "");
+    await ctx.ensureGroupChatRefForIncoming(groupId, createdAt, v.content || "");
+    reconcilePendingMessage("group", groupId, {
+      authorId: v.authorId,
+      createdAt,
+      content: v.content || ""
+    });
     addMessageToUI({
       authorId: v.authorId,
       authorDisplay,
       content: v.content || "",
-      createdAt: v.createdAt || ctx.nowMs(),
+      createdAt,
       scopeType: "group",
       scopeId: groupId,
       msgKey
     });
-    if (v.authorId && v.authorId !== ctx.S.uid) {
-      playMessageDing();
-    }
+    if (v.authorId && v.authorId !== ctx.S.uid) playMessageDing();
 
     await ctx.updateMyChatRef(sk, {
-      lastAt: v.createdAt || ctx.nowMs(),
+      lastAt: createdAt,
       sub: (v.content || "").slice(0, 90)
     });
 
@@ -405,7 +490,10 @@ function renderHomePanel() {
 }
 
 async function onSendClicked() {
-  if (!ctx.S.user || !ctx.S.active) { ctx.showToast("Select a chat first.", "warn"); return; }
+  if (!ctx.S.user || !ctx.S.active) {
+    ctx.showToast("Select a chat first.", "warn");
+    return;
+  }
 
   const raw = String(ctx.S.ui.msgBox.value || "");
   const contentTrim = raw.trim();
@@ -430,14 +518,24 @@ async function onSendClicked() {
     return;
   }
 
+  const msgObj = { authorId: ctx.S.uid, content: raw.slice(0, ctx.MAX_MESSAGE_CHARS), createdAt: ctx.nowMs() };
+  const scopeType = ctx.S.active.type === "dm" ? "dm" : "group";
+  const scopeId = ctx.S.active.id;
+  const sk = ctx.scopeKey(scopeType, scopeId);
+  if (!ctx.S._seenMsgKeys[sk]) ctx.S._seenMsgKeys[sk] = new Set();
+
+  let pendingKey = null;
+  let composerCleared = false;
+
   try {
     ctx.S.ui.sendBtn.disabled = true;
-
-    const msgObj = { authorId: ctx.S.uid, content: raw.slice(0, ctx.MAX_MESSAGE_CHARS), createdAt: ctx.nowMs() };
-    const scopeType = ctx.S.active.type === "dm" ? "dm" : "group";
-    const scopeId = ctx.S.active.id;
-    const sk = ctx.scopeKey(scopeType, scopeId);
-    if (!ctx.S._seenMsgKeys[sk]) ctx.S._seenMsgKeys[sk] = new Set();
+    pendingKey = renderPendingMessage(scopeType, scopeId, msgObj, () => {
+      const pending = ctx.S.pendingMessages[pendingKey];
+      if (!pending || !ctx.S.ui?.msgBox) return;
+      ctx.S.ui.msgBox.value = pending.msgObj.content;
+      onComposerInput();
+      onSendClicked();
+    });
 
     let msgRef = null;
     if (scopeType === "dm") {
@@ -449,17 +547,7 @@ async function onSendClicked() {
 
     const msgKey = msgRef?.key || null;
     if (msgRef) await ctx.set(msgRef, msgObj);
-
     if (msgKey) ctx.S._seenMsgKeys[sk].add(msgKey);
-    addMessageToUI({
-      authorId: ctx.S.uid,
-      authorDisplay: ctx.S.profile?.displayNameDisplay || "You",
-      content: msgObj.content,
-      createdAt: msgObj.createdAt,
-      scopeType,
-      scopeId,
-      msgKey
-    });
 
     if (scopeType === "dm") {
       await ctx.upsertMyChatRef("dm", scopeId, ctx.S.active.name, null, msgObj.createdAt, msgObj.content.slice(0, 90));
@@ -477,10 +565,15 @@ async function onSendClicked() {
     ctx.S.ui.msgBox.value = "";
     ctx.S.ui.countLine.textContent = `0 / ${ctx.MAX_MESSAGE_CHARS}`;
     ctx.S.isTyping = false;
+    composerCleared = true;
     await setMyTyping(false);
-
     await ctx.markActiveReadNow();
   } catch (e) {
+    if (pendingKey) markPendingMessageError(pendingKey);
+    if (composerCleared && ctx.S.ui?.msgBox) {
+      ctx.S.ui.msgBox.value = msgObj.content;
+      ctx.S.ui.countLine.textContent = `${msgObj.content.length} / ${ctx.MAX_MESSAGE_CHARS}`;
+    }
     ctx.logFirebaseError("send-message", e);
   } finally {
     ctx.S.ui.sendBtn.disabled = false;
