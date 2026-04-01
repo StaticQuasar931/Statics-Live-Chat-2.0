@@ -1,0 +1,110 @@
+body.theme-dark{
+  --bg:#0c0f14;
+  --panel:#121825;
+  --panel2:#0f1520;
+  --text:#e9eef9;
+  --muted:#a8b1c7;
+  --border: rgba(255,255,255,.10);
+  --shadow: 0 12px 34px rgba(0,0,0,.35);
+  --accent:#6aa7ff;
+}
+body.theme-light{
+  --bg:#f4f7ff;
+  --panel:#ffffff;
+  --panel2:#f7f9ff;
+  --text:#111526;
+  --muted:#4c556e;
+  --border: rgba(17,21,38,.14);
+  --shadow: 0 12px 34px rgba(10,12,22,.12);
+  --accent:#2962ff;
+}
+body.theme-ocean{
+  --bg:#06121a;
+  --panel:#0b1f2b;
+  --panel2:#0a1822;
+  --text:#e6f8ff;
+  --muted:#93b7c6;
+  --border: rgba(230,248,255,.12);
+  --shadow: 0 12px 34px rgba(0,0,0,.35);
+  --accent:#3ad1ff;
+}
+body.theme-forest{
+  --bg:#07120c;
+  --panel:#0b1f14;
+  --panel2:#0a1810;
+  --text:#eafff2;
+  --muted:#9ac6ae;
+  --border: rgba(234,255,242,.12);
+  --shadow: 0 12px 34px rgba(0,0,0,.35);
+  --accent:#32d17b;
+}
+body.theme-sunset{
+  --bg:#160c0f;
+  --panel:#231218;
+  --panel2:#1b0f14;
+  --text:#ffe8f0;
+  --muted:#d9a8b8;
+  --border: rgba(255,232,240,.14);
+  --shadow: 0 12px 34px rgba(0,0,0,.35);
+  --accent:#ff7a59;
+}
+body.theme-lavender{
+  --bg:#151225;
+  --panel:#1d1a33;
+  --panel2:#18162c;
+  --text:#f1ecff;
+  --muted:#b7addd;
+  --border: rgba(241,236,255,.14);
+  --shadow: 0 12px 34px rgba(0,0,0,.35);
+  --accent:#9f7bff;
+}
+body.theme-midnight{
+  --bg:#06070f;
+  --panel:#0d1222;
+  --panel2:#0b111f;
+  --text:#e7f0ff;
+  --muted:#93a3c3;
+  --border: rgba(231,240,255,.12);
+  --shadow: 0 12px 34px rgba(0,0,0,.42);
+  --accent:#3b82f6;
+}
+body.theme-rose{
+  --bg:#160b12;
+  --panel:#20101b;
+  --panel2:#190e16;
+  --text:#ffe9f4;
+  --muted:#d6a3bd;
+  --border: rgba(255,233,244,.14);
+  --shadow: 0 12px 34px rgba(0,0,0,.35);
+  --accent:#ff5ca8;
+}
+body.theme-neon{
+  --bg:#080a18;
+  --panel:#0e1228;
+  --panel2:#0b0f21;
+  --text:#f5f7ff;
+  --muted:#9aa4ff;
+  --border: rgba(109, 122, 255, .25);
+  --shadow: 0 12px 34px rgba(14, 12, 48, .45);
+  --accent:#7c5cff;
+}
+body.theme-sand{
+  --bg:#f7f1e6;
+  --panel:#fff8ed;
+  --panel2:#f3ead8;
+  --text:#40362a;
+  --muted:#7b6e60;
+  --border: rgba(64,54,42,.18);
+  --shadow: 0 12px 34px rgba(64,54,42,.12);
+  --accent:#c08b5c;
+}
+body.theme-icy{
+  --bg:#e9f5ff;
+  --panel:#f6fbff;
+  --panel2:#e3eef8;
+  --text:#12324d;
+  --muted:#4a6a82;
+  --border: rgba(18,50,77,.15);
+  --shadow: 0 12px 34px rgba(18,50,77,.12);
+  --accent:#5aa6ff;
+}
