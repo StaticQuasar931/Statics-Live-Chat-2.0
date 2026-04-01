@@ -2067,13 +2067,21 @@ function renderOutgoingRequests() {
   }
 }
 
-async function sendFriendRequestByDisplayOrEmail(input) {`r`n  return legacySendFriendRequestByDisplayOrEmail(input);`r`n}
+async function sendFriendRequestByDisplayOrEmail(input) {
+  return legacySendFriendRequestByDisplayOrEmail(input);
+}
 
-async function declineFriendRequest(fromUid) {`r`n  return legacyDeclineFriendRequest(fromUid);`r`n}
+async function declineFriendRequest(fromUid) {
+  return legacyDeclineFriendRequest(fromUid);
+}
 
-async function cancelOutgoingRequest(toUid, { silent = false } = {}) {`r`n  return legacyCancelOutgoingRequest(toUid, { silent });`r`n}
+async function cancelOutgoingRequest(toUid, { silent = false } = {}) {
+  return legacyCancelOutgoingRequest(toUid, { silent });
+}
 
-async function ensureFriendshipFromOutgoing(otherUid, displayName, photoURL) {`r`n  return legacyEnsureFriendshipFromOutgoing(otherUid, displayName, photoURL);`r`n}
+async function ensureFriendshipFromOutgoing(otherUid, displayName, photoURL) {
+  return legacyEnsureFriendshipFromOutgoing(otherUid, displayName, photoURL);
+}
 
 async function pruneOutgoingRequests() {
   const outgoing = S.friendRequestsOut || {};
