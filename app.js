@@ -2067,91 +2067,13 @@ function renderOutgoingRequests() {
   }
 }
 
-async function sendFriendRequestByDisplayOrEmail(input) {
-  const raw = String(input || "").trim();
-  if (!raw) return;
+async function sendFriendRequestByDisplayOrEmail(input) {`r`n  return legacySendFriendRequestByDisplayOrEmail(input);`r`n}
 
-  const normalized = normalizeDisplayName(raw);
+async function declineFriendRequest(fromUid) {`r`n  return legacyDeclineFriendRequest(fromUid);`r`n}
 
-  const peopleSnap = await safeGet(ref(db, PEOPLE_ROOT));
-  const legacySnap = peopleSnap?.exists?.() ? null : await safeGet(ref(db, "publicUsers"));
-  const all = peopleSnap?.exists?.() ? (peopleSnap.val() || {}) : (legacySnap?.val?.() || {});
-  if (!Object.keys(all || {}).length) throw new Error("No users found yet.");
+async function cancelOutgoingRequest(toUid, { silent = false } = {}) {`r`n  return legacyCancelOutgoingRequest(toUid, { silent });`r`n}
 
-  let targetUid = null;
-  let targetDisplay = null;
-  for (const [uid, u] of Object.entries(all)) {
-    const dn = normalizeDisplayName(peopleSnap?.exists?.() ? (u?.public?.displayNameDisplay || "") : (u?.displayNameDisplay || ""));
-    if (dn && dn === normalized) {
-      targetUid = uid;
-      targetDisplay = peopleSnap?.exists?.() ? (u?.public?.displayNameDisplay || raw) : (u?.displayNameDisplay || raw);
-      break;
-    }
-  }
-
-  if (!targetUid) throw new Error("User not found (display name).");
-  if (targetUid === S.uid) throw new Error("You can’t add yourself.");
-  if (S.friends?.[targetUid]) throw new Error("You are already friends.");
-  if (S.friendRequestsOut?.[targetUid]) throw new Error("Friend request already sent.");
-
-  const fSnap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/friends/${targetUid}`));
-  const fLegacy = fSnap?.exists?.() ? null : await safeGet(ref(db, `users/${S.uid}/friends/${targetUid}`));
-  if (fSnap?.exists?.() || fLegacy?.exists?.()) throw new Error("You are already friends.");
-
-  const blockSnap = await safeGet(ref(db, `${peoplePrivatePath(S.uid)}/blocks/${targetUid}`));
-  const blockLegacy = blockSnap?.exists?.() ? null : await safeGet(ref(db, `users/${S.uid}/blocks/${targetUid}`));
-  if (blockSnap?.exists?.() || blockLegacy?.exists?.()) throw new Error("You blocked this user.");
-
-  const fromPhoto = S.profile?.photoURL || S.user?.photoURL || null;
-  const targetPhoto = peopleSnap?.exists?.() ? (all?.[targetUid]?.public?.photoURL || null) : (all?.[targetUid]?.photoURL || null);
-  await update(ref(db, `users/${S.uid}/friendRequestsOut/${targetUid}`), {
-    toUid: targetUid,
-    toDisplay: targetDisplay,
-    createdAt: nowMs(),
-    toPhoto: targetPhoto
-  }).catch(() => {});
-  await update(ref(db, `users/${targetUid}/friendRequestsIn/${S.uid}`), {
-    fromUid: S.uid,
-    fromDisplay: S.profile.displayNameDisplay,
-    fromPhoto,
-    createdAt: nowMs()
-  }).catch(() => {});
-
-  await incrementStatCounter(S.uid, "friendRequestsSent", 1);
-  await logStatEvent(S.uid, "friend-request-sent", { toUid: targetUid });
-  showToast(`Friend request sent to ${targetDisplay}.`, "ok");
-}
-
-async function declineFriendRequest(fromUid) {
-  try {
-    await remove(ref(db, `users/${S.uid}/friendRequestsIn/${fromUid}`)).catch(() => {});
-    await incrementStatCounter(S.uid, "friendRequestsDeclined", 1);
-    await logStatEvent(S.uid, "friend-request-declined", { fromUid });
-    showToast("Request declined.", "ok");
-  } catch {
-    showToast("Failed to decline.", "error");
-  }
-}
-
-async function cancelOutgoingRequest(toUid, { silent = false } = {}) {
-  if (!toUid) return;
-  await remove(ref(db, `users/${S.uid}/friendRequestsOut/${toUid}`)).catch(() => {});
-  await remove(ref(db, `users/${toUid}/friendRequestsIn/${S.uid}`)).catch(() => {});
-  if (!silent) showToast("Request canceled.", "ok");
-}
-
-async function ensureFriendshipFromOutgoing(otherUid, displayName, photoURL) {
-  if (!otherUid || S.friends?.[otherUid]) return;
-  if (!S.friendRequestsOut?.[otherUid]) return;
-  await update(ref(db, `users/${S.uid}/friends/${otherUid}`), {
-    uid: otherUid,
-    displayNameDisplay: displayName || "Friend",
-    photoURL: photoURL || null,
-    since: nowMs()
-  }).catch(() => {});
-  await remove(ref(db, `users/${S.uid}/friendRequestsOut/${otherUid}`)).catch(() => {});
-  await remove(ref(db, `users/${otherUid}/friendRequestsIn/${S.uid}`)).catch(() => {});
-}
+async function ensureFriendshipFromOutgoing(otherUid, displayName, photoURL) {`r`n  return legacyEnsureFriendshipFromOutgoing(otherUid, displayName, photoURL);`r`n}
 
 async function pruneOutgoingRequests() {
   const outgoing = S.friendRequestsOut || {};
@@ -2258,7 +2180,7 @@ async function repairMutualFriendship(otherUid, displayName, photoURL) {
   return { dmId, otherDisplay, otherPhoto, createdAt: ts };
 }
 
-async function acceptFriendRequest(fromUid) {
+async function legacyAcceptFriendRequest(fromUid) {
   try {
     const pub = await safeGet(ref(db, peoplePublicPath(fromUid)));
     const legacyPub = pub?.exists?.() ? null : await safeGet(ref(db, `publicUsers/${fromUid}`));
@@ -2301,7 +2223,7 @@ async function acceptFriendRequest(fromUid) {
   }
 }
 
-async function sendFriendRequestByDisplayOrEmail(input) {
+async function legacySendFriendRequestByDisplayOrEmail(input) {
   const raw = String(input || "").trim();
   if (!raw) return;
 
@@ -2352,7 +2274,7 @@ async function sendFriendRequestByDisplayOrEmail(input) {
   showToast(`Friend request sent to ${targetDisplay}.`, "ok");
 }
 
-async function declineFriendRequest(fromUid) {
+async function legacyDeclineFriendRequest(fromUid) {
   try {
     const updates = {
       [`${USERS_ROOT}/${S.uid}/friendRequestsIn/${fromUid}`]: null,
@@ -2368,7 +2290,7 @@ async function declineFriendRequest(fromUid) {
   }
 }
 
-async function cancelOutgoingRequest(toUid, { silent = false } = {}) {
+async function legacyCancelOutgoingRequest(toUid, { silent = false } = {}) {
   if (!toUid) return;
   await update(ref(db), {
     [`${USERS_ROOT}/${S.uid}/friendRequestsOut/${toUid}`]: null,
@@ -2378,7 +2300,7 @@ async function cancelOutgoingRequest(toUid, { silent = false } = {}) {
   if (!silent) showToast("Request canceled.", "ok");
 }
 
-async function ensureFriendshipFromOutgoing(otherUid, displayName, photoURL) {
+async function legacyEnsureFriendshipFromOutgoing(otherUid, displayName, photoURL) {
   if (!otherUid || S.friends?.[otherUid] || !S.friendRequestsOut?.[otherUid]) return;
   await repairMutualFriendship(otherUid, displayName, photoURL);
 }
@@ -3886,3 +3808,4 @@ onAuthStateChanged(auth, async (user) => {
     await updatePeoplePrivate(S.uid, { settings: { ...S.profile?.settings, messageSounds: soundToggle.checked } });
     await update(ref(db, `users/${S.uid}/settings`), { messageSounds: soundToggle.checked }).catch((e) => logFirebaseError("update-message-sounds", e));
   });
+
